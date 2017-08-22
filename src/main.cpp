@@ -254,21 +254,37 @@ int main(int argc, char *argv[]) {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
+          // ===START===
+
+          // Time each simulation step.
+          double dt = 0.02;
+
+          // waypoints
+          vector<double> ptsx;
+          vector<double> ptsy;
+
+          // Current car state.
+          double ref_x = car_x;
+          double ref_y = car_y;
+          double ref_yaw = deg2rad(car_yaw);
+
+          // Reference velocity
+          double ref_v = 49.5;
+
+          // Current lane: 0 - left, 1 - center, 2 - right
+          int lane = 1;
+
+          double prev_car_x = car_x - cos(car_yaw);
+          std::cout << "car_x " << car_x << std::endl;
+          std::cout << "prev_car_x " << prev_car_x << std::endl << std::endl;
+          // Shift reference
+
 
           tk::spline s;
 
-          double dist_inc = 0.5;
-          for(int i = 0; i < 10; i++)
-          {
-            double next_s = car_s + (i+1)*dist_inc;
-            double next_d = 6;
-            vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            next_x_vals.push_back(xy[0]);
-            next_y_vals.push_back(xy[1]);
-          }
 
-          // END
+
+          // ===END===
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
