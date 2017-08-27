@@ -11,8 +11,8 @@
 #include <string>
 #include "helpers.h"
 #include "spline.h"
-#include "vehicle.h"
 #include "cost.h"
+#include "vehicle.h"
 
 using namespace std;
 using namespace ego;
@@ -72,6 +72,7 @@ int main(int argc, char *argv[]) {
     map_waypoints_dx.push_back(d_x);
     map_waypoints_dy.push_back(d_y);
   }
+  init(map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
   World world;
   world.map_waypoints_x = &map_waypoints_x;
@@ -138,11 +139,12 @@ int main(int argc, char *argv[]) {
           double car_length = 1.0;
 
           EgoConfig ego_config;
-          ego_config.target_speed = mph2mps(49.5); // mps
+          ego_config.default_target_speed = mph2mps(48.5);
+          ego_config.default_max_acceleration = 8.0;
+          ego_config.target_speed = mph2mps(48.5); // mps
           ego_config.dt = dt;
           ego_config.car_length = car_length;
-          ego_config.max_acceleration = 9.5; // m/s^3
-          ego_config.max_jerk = 10; // m/s^3
+          ego_config.max_jerk = 9; // m/s^3
           ego_config.previous_path_x = &previous_path_x;
           ego_config.previous_path_y = &previous_path_y;
           ego_config.end_path_s = &end_path_s;
@@ -150,11 +152,14 @@ int main(int argc, char *argv[]) {
           ego_config.target_lane = d2lane(car_d);
 
           // Number of waypoints.
-          ego_config.num_wp = 40;
+          ego_config.num_wp = 80;
+
+          // ego_config.num_last_path = 50;
 
           // Spline anchors
           ego_config.spline_anchors = 3;
-          ego_config.anchor_distance = 30.0;
+          ego_config.horizon = 100.0;
+          ego_config.anchor_ddist_threshold = 2.0;
 
           Position pos;
           pos.x = car_x;
@@ -212,15 +217,11 @@ int main(int argc, char *argv[]) {
           // ---END---
 
           CostWeights weights;
-          weights.time_diff = 10;
-          weights.s_diff = 100;
-          weights.efficiency = 1;
-          weights.max_jerk = 90;
-          weights.total_jerk = 100;
-          weights.collision = 1000;
-          weights.buffer = 10;
-          weights.max_accel = 2;
-          weights.total_accel = 5;
+          weights.collision = 0.8;
+          weights.efficiency = 2.0;
+          weights.max_accel = 0.5;
+          weights.max_jerk = 0.5;
+          weights.change_state = 1.0;
 
           Trajectory best_trajectory = ego.PlanTrajectory(other_cars, weights);
 

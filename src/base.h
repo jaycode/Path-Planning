@@ -15,17 +15,21 @@ typedef struct Trajectory {
   std::vector<double> y;
   std::vector<double> s;
   std::vector<double> d;
+  // We use trailing distance since getFrenet method is not accurate
+  // enough to calculate the distance over a long time.
+  // Trailing distance is calculated in function EgoCar::CreateTrajectory.
+  double distance;
 } Trajectory;
 
 enum State {
-  // Constant Speed (useful for other cars)
-  STATE_CS = 0,
   // Keep Lane
-  STATE_KL,
+  STATE_KL = 0,
   // Lane Change Left
   STATE_LCL,
   // Lane Change Right
   STATE_LCR,
+  // Follow a Car
+  STATE_FC,
   // Used for enum loop, do not remove, and keep it as the last element.
   // See EgoCar::ChooseBestState() function for an example of implementation.
   ENUM_END
@@ -36,11 +40,11 @@ inline const char* State2Str(State v)
 {
     switch (v)
     {
-        case STATE_CS:   return "Constant Speed";
         case STATE_KL:   return "Keep Lane";
-        case STATE_LCL: return "Lane Change Left";
-        case STATE_LCR: return "Lane Change Right";
-        default:      return "[Unknown State]";
+        case STATE_LCL:  return "Lane Change Left";
+        case STATE_LCR:  return "Lane Change Right";
+        case STATE_FC:   return "Follow Car";
+        default:         return "[Unknown State]";
     }
 }
 
@@ -58,6 +62,9 @@ typedef struct Config {
 } Config;
 
 typedef struct EgoConfig : Config {
+  double default_target_speed = 0.0;
+  double default_max_acceleration = 0.0;
+
   // mph
   double target_speed = 0.0;
 
@@ -73,15 +80,30 @@ typedef struct EgoConfig : Config {
   double *end_path_d;
 
   // Number of waypoints.
-  int num_wp = 30;
+  int num_wp = 60;
+
+  // Maximum number of points from last path to use.
+  // int num_last_path = 15;
 
   // Spline anchors
-  int spline_anchors = 3;
-  double anchor_distance = 30.0;
+  int spline_anchors;
+  double horizon;
+  // If the difference of anchor distance of xy and sd positions
+  // are higher than this value, then something is wrong in
+  // Frenet to XY conversion (`getXY()` function). The car must be
+  // less sure on what to do now.
+  double anchor_ddist_threshold;
 
   // Target position x meter ahead of the ego car.
   // The ego car will spline its trajectory into this position.
+  // When the car is unsure, set this to a car in front of ego car.
   double target_x = 30.0;
+
+  // When true, the car is unsure if the frenet conversion was correct.
+  bool unsure_frenet = false;
+
+  // When following a car, what's the distance to keep?
+  double follow_distance = 8;
 
 } EgoConfig;
 
@@ -122,24 +144,20 @@ typedef struct World {
  * 
  */
 typedef struct Snapshot {
+  State state;
   World world;
   Position position;
   EgoConfig config;
 } Snapshot;
 
-/**
- * Weights used in cost function.
- */
 typedef struct CostWeights {
   double time_diff;
   double s_diff;
   double efficiency;
-  double max_jerk;
-  double total_jerk;
-  double collision;
-  double buffer;
   double max_accel;
-  double total_accel;
+  double max_jerk;
+  double collision;
+  double change_state;
 } CostWeights;
 
 }

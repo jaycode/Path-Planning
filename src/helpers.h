@@ -11,17 +11,19 @@
 #include <string>
 #include <algorithm>
 #include "json.hpp"
+#include "spline.h"
 
-using namespace std;
-
-// for convenience
-using json = nlohmann::json;
 
 // Reason for unnamed namespace:
 // https://google.github.io/styleguide/cppguide.html#Unnamed_Namespaces_and_Static_Variables
 namespace {
 
 namespace ego_help {
+
+using namespace std;
+
+// for convenience
+using json = nlohmann::json;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
@@ -37,7 +39,17 @@ double lane2d(int lane) { return 2.0+4.0*lane; }
 // Converts d to lane number
 int d2lane(double d) { return (int)(((d-2.0)/4.0) + 0.5); }
 
+// Finds standard deviation. Useful for debuggging trajectory positions.
+double stdev(vector<double> v) {
+  double sum = std::accumulate(v.begin(), v.end(), 0.0);
+  double mean = sum / v.size();
 
+  std::vector<double> diff(v.size());
+  std::transform(v.begin(), v.end(), diff.begin(), [mean](double x) { return x - mean; });
+  double sq_sum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
+  double stdev = std::sqrt(sq_sum / v.size());
+  return stdev;
+}
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -103,6 +115,11 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
 }
 
 // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
+/**
+ * WARNING!!! The conversion is inaccurate, do not use for critical functions.
+ * DO NOT USE especially for global distance calculation e.g. to find out trajectory
+ * distance.
+ */
 vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
 {
   int next_wp = NextWaypoint(x,y, theta, maps_x,maps_y);
@@ -177,6 +194,71 @@ vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> m
 
   return {x,y};
 }
+
+tk::spline sx;
+tk::spline sy;
+tk::spline sh;
+
+ofstream csvfile;
+
+void init(vector<double> maps_s, vector<double> maps_x, vector<double> maps_y) 
+{
+  csvfile.open ("debug.csv");
+
+  vector<double> maps_h;
+  double prev_heading = 0;
+  for (int i=0; i<maps_s.size(); i++) 
+  {
+    int next_i = (i+1)%maps_x.size();
+    double dy = maps_y[next_i]-maps_y[i];
+    double dx = maps_x[next_i]-maps_x[i];
+    double heading = atan2(dy,dx);
+    if (fabs(heading-prev_heading) > pi()/2) {
+      heading += 2*pi();
+    }
+    prev_heading = heading;
+    //csvfile << dx << "," << dy << "," << heading << endl;
+    maps_h.push_back(heading);
+  }
+
+  sx.set_points(maps_s, maps_x);    // currently it is required that X is already sorted
+  sy.set_points(maps_s, maps_y);    // currently it is required that X is already sorted
+  sh.set_points(maps_s, maps_h);    // currently it is required that X is already sorted
+
+/*
+  //csvfile.close();
+  //csvfile.open("debug2.csv");
+
+  for (double s=3200; s<3350; s+=0.1) {
+    double d = 2;
+    vector<double> xy = getXY(s, d, maps_s, maps_x, maps_y);
+    csvfile << s << "," << d << "," << xy[0] << "," << xy[1] << endl;
+  }
+  csvfile.flush();
+*/
+}
+
+// vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> maps_x, vector<double> maps_y)
+// {
+//   double heading = sh(s);
+
+//   double perp_heading = heading-pi()/2;
+
+
+//   double x = sx(s) + d*cos(perp_heading);
+//   double y = sy(s) + d*sin(perp_heading);
+  
+//   csvfile << sx(s) << "," << sy(s) << "," << perp_heading << ",";
+// /*
+//   cout << "s = " << s;
+//   cout << ", d = " << d;
+//   cout << ", x = " << x;
+//   cout << ", y = " << y;
+//   cout << ", heading = " << heading << endl;
+// */
+//   return {x,y};
+
+// }
 
 template <typename T>
 vector<size_t> SortIndexes(const vector<T> &v) {

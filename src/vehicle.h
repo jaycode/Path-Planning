@@ -56,7 +56,8 @@ class EgoCar : public Vehicle {
    * trajectory can directly be used to draw waypoints.
    */
   ego::Trajectory CreateTrajectory(ego::State state,
-                                   const std::vector<ego::OtherCar> &other_cars);
+                                   const std::vector<ego::OtherCar> &other_cars,
+                                   ego::Snapshot *snap);
 
   ego::State ChooseBestState(const std::vector<ego::OtherCar> &other_cars,
                              const ego::CostWeights &weights,
@@ -65,19 +66,25 @@ class EgoCar : public Vehicle {
   /**
    * Checks if this car is behind another car.
    */
-  bool is_behind(const OtherCar &car, const Position &ref);
+  bool is_behind(const OtherCar &car);
 
   /**
    * When keeping lane, make sure not to collide into the car in the same lane.
    */
   void RealizeKeepLane(const std::vector<ego::OtherCar> &other_cars,
-                       ego::Position *ref);
+                       const ego::Position &ref, ego::Snapshot *snap);
+
+  void RealizeFollowCar(const std::vector<ego::OtherCar> &other_cars,
+                        const ego::Position &ref, ego::Snapshot *snap);
 
   void RealizeLaneChange(const std::vector<ego::OtherCar> &other_cars,
-                         int num_lanes, ego::Position *ref);
+                         int num_lanes, const ego::Position &ref, ego::Snapshot *snap);
 
-  double TargetSpeedForLane(const std::vector<ego::OtherCar> &other_cars,
-                            const ego::Position &ref);
+  std::vector<ego::OtherCar> FindClosestCar(
+    const std::vector<OtherCar> &other_cars,
+    const ego::Position &ref, Snapshot *snap,
+    const std::vector<int> &lanes,
+    double minimum_distance /*= 5.0*/);
 
 };
 
