@@ -547,6 +547,6 @@ void EgoCar::RealizeLaneChange(const vector<OtherCar> &other_cars,
 
   // Turning would naturally result in smaller acceleration.
   // TODO: Find this decrease value with the right physics.
-  (*snap).config.max_acceleration = 0.80 * (*snap).config.default_max_acceleration;
-  (*snap).config.target_speed = 0.8 * (*snap).config.default_target_speed;
+  (*snap).config.max_acceleration = .5 * (*snap).config.default_max_acceleration;
+  (*snap).config.target_speed = .5 * (*snap).config.default_target_speed;
 }
