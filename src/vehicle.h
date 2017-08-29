@@ -55,13 +55,15 @@ class EgoCar : public Vehicle {
    * Get trajectory (in world coordinate) from the current state.
    * trajectory can directly be used to draw waypoints.
    */
-  ego::Trajectory CreateTrajectory(ego::State state,
-                                   const std::vector<ego::OtherCar> &other_cars,
-                                   ego::Snapshot *snap);
+  void CreateTrajectories(ego::State state,
+                          const std::vector<ego::OtherCar> &other_cars,
+                          ego::Snapshot *snap,
+                          ego::Trajectory *waypoints,
+                          ego::Trajectory *plan);
 
   ego::State ChooseBestState(const std::vector<ego::OtherCar> &other_cars,
                              const ego::CostWeights &weights,
-                             ego::Trajectory *best_t);
+                             ego::Trajectory *waypoints);
 
   /**
    * Checks if this car is behind another car.

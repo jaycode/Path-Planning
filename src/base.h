@@ -7,6 +7,11 @@
 
 #include <vector>
 #include "json.hpp"
+#include "spline.h"
+
+extern tk::spline sx;
+extern tk::spline sy;
+extern tk::spline sh;
 
 namespace ego {
 
@@ -82,6 +87,10 @@ typedef struct EgoConfig : Config {
   // Number of waypoints.
   int num_wp = 60;
 
+  // Number of plan points ahead of the end of
+  // waypoints.
+  int num_pp = 80;
+
   // Maximum number of points from last path to use.
   // int num_last_path = 15;
 
@@ -98,9 +107,6 @@ typedef struct EgoConfig : Config {
   // The ego car will spline its trajectory into this position.
   // When the car is unsure, set this to a car in front of ego car.
   double target_x = 30.0;
-
-  // When true, the car is unsure if the frenet conversion was correct.
-  bool unsure_frenet = false;
 
   // When following a car, what's the distance to keep?
   double follow_distance = 8;
@@ -120,6 +126,7 @@ typedef struct Position {
   double s;
   double d;
   double v;
+  double a;
   // radian
   double yaw = 0.0;
   // The other two here are not super useful, but they are

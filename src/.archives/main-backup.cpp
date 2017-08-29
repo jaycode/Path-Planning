@@ -1,485 +1,324 @@
+#include <fstream>
+#include <math.h>
+#include <uWS/uWS.h>
+#include <chrono>
 #include <iostream>
-#include "vehicle.h"
+#include <thread>
+#include <vector>
+#include "Eigen-3.3/Eigen/Core"
+#include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
+#include <string>
 #include "helpers.h"
 #include "spline.h"
-#include <float.h>
-#include <math.h>
-#include <tuple>
 #include "cost.h"
+#include "vehicle.h"
+#include <ctime>
 
-using json = nlohmann::json;
-
+using namespace std;
 using namespace ego;
 using namespace ego_help;
 
-/**
- * Initialize Vehicle
- */
-EgoCar::EgoCar(World world, Position position, EgoConfig config) {
-  this->position = position;
-  this->config = config;
-  this->world = world;
-}
+// for convenience
+using json = nlohmann::json;
 
-OtherCar::OtherCar(World world, Position position, OtherConfig config) {
-  this->world = world;
-  this->position = position;
-  this->config = config;
-}
+int main(int argc, char *argv[]) {
+  uWS::Hub h;
 
-EgoCar::~EgoCar() {}
-OtherCar::~OtherCar() {}
+  // Load up map values for waypoint's x,y,s and d normalized normal vectors
+  vector<double> map_waypoints_x;
+  vector<double> map_waypoints_y;
+  vector<double> map_waypoints_s;
+  vector<double> map_waypoints_dx;
+  vector<double> map_waypoints_dy;
 
-Snapshot EgoCar::getSnapshot() {
-  Snapshot snap;
-  snap.world = this->world;
-  snap.position = this->position;
-  snap.config = this->config;
-  return snap;
-}
+  // Waypoint map to read from
 
-void EgoCar::InitFromSnapshot(const Snapshot &snap) {
-  this->world = snap.world;
-  this->position = snap.position;
-  this->config = snap.config;
-}
-
-Trajectory EgoCar::PlanTrajectory(const vector<OtherCar> &other_cars,
-                                  const ego::CostWeights &weights) {
-  Trajectory t;
-  State best_state = this->ChooseBestState(other_cars, weights, &t);
-  this->state = best_state;
-  return t;
-}
-
-int debug_iter = 0;
-State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
-                              const ego::CostWeights &weights,
-                              Trajectory *best_t) {
-  double best_cost = DBL_MAX;
-  State best_state;
-
-  // Go through the states one by one and calculate the cost for walking down
-  // each state.
-  Snapshot initial_snap = this->getSnapshot();
-  Snapshot best_snap;
-
-  Trajectory current_best_t;
-
-  for ( int state = 1; state != ENUM_END; state++ ) {
-    cout << "Now calculating cost of state " << State2Str((State)state) << endl;
-    Snapshot cur_snap = this->getSnapshot();
-    // For each state, the ego vehicle "imagines" following a trajectory
-    Trajectory trajectory = this->CreateTrajectory((State)state, other_cars, &cur_snap);
-
-    cout << "trajectory last s,d: " << trajectory.s[trajectory.s.size()-1] <<
-      ", " << trajectory.d[trajectory.d.size()-1] << endl;
-    // TODO: Looks like reinforcement learning can be implemented here
-    //       by treating (state + other_cars) as a state
-    tuple<State, Snapshot, vector<OtherCar>> cf_state = 
-      make_tuple(State(state), cur_snap, other_cars);
-
-    double cost = ego_cost::CalculateCost(cf_state, trajectory, weights);
-    if (cost < best_cost) {
-      best_state = (State)state;
-      current_best_t = trajectory;
-      best_cost = cost;
-      best_snap = cur_snap;
-    }
-    cout << "Cost of state " << State2Str((State)state) << ": " << cost << endl << endl;
-    this->InitFromSnapshot(initial_snap);
-  }
-  cout << "Chosen State: " << State2Str((State)best_state) << endl << "-----" << endl << endl;
-  (*best_t) = current_best_t;
-  this->InitFromSnapshot(best_snap);
-  // ++debug_iter;
-  // if (debug_iter == 1) {
-  //   exit(0);
-  // }
-  // cout << "chosen target speed: " << this->config.target_speed << endl;
-  // cout << "Target lane: " << this->config.target_lane << " or in d: " << lane2d(this->config.target_lane) << endl;
-
-  return (State)best_state;
-}
-
-Trajectory EgoCar::CreateTrajectory(State state,
-                                    const vector<OtherCar> &other_cars,
-                                    Snapshot *snap) {
-  Trajectory t;
-  vector<double> x = {};
-  vector<double> y = {};
-  vector<double> s = {};
-  vector<double> d = {};
-  t.x = x;
-  t.y = y;
-  t.s = s;
-  t.d = d;
-  t.distance = 0.0;
-
-  vector<double> &map_waypoints_s = *this->world.map_waypoints_s;
-  vector<double> &map_waypoints_x = *this->world.map_waypoints_x;
-  vector<double> &map_waypoints_y = *this->world.map_waypoints_y;
-
-  json &previous_path_x = *(*snap).config.previous_path_x;
-  json &previous_path_y = *(*snap).config.previous_path_y;
-
-  int prev_size = previous_path_x.size();
-  // if (prev_size > (*snap).config.num_last_path) {
-  //   prev_size = (*snap).config.num_last_path;
-  // }
-  Position ref = (*snap).position;
-  // ref.x = (*snap).position.x;
-  // ref.y = (*snap).position.y;
-  // ref.yaw = (*snap).position.yaw;
-  // ref.v = (*snap).position.v;
-
-  double &car_length = (*snap).config.car_length;
-
-
-  // cout << "ego targets:\n"
-  //      << "v: " << ref_v << "\n"
-  //      << "ref_yaw: " << ref_yaw << "\n"
-  //      << "lane: " << lane << endl;
-
-  // Local-coordinates of waypoints (i.e. car position is [0,0])
-  vector<double> localwp_x;
-  vector<double> localwp_y;
-
-  // cout << "car position [x,y]|[s,d]: [" << ref_x << ", " << ref_y <<
-  //         "][" << car_s << ", " << car_d << "]" << endl;
-
-  // cout << "Checking conversion accuracy" << endl;
-  // cout << "Car s, d converted into x, y: " << endl;
-  // vector<double> cur_xy = getXY(car_s, car_d,
-  //                                map_waypoints_s, map_waypoints_x,
-  //                                map_waypoints_y);
-  // cout << cur_xy[0] << ", " << cur_xy[1] << endl;
-
-  if (prev_size < 2) {
-    // Create the initial two waypoints.
-    // This is important otherwise the car would jump to nowhere.
-
-    // Calculate previous position i.e. the position of
-    // rear wheels.
-    double prev_car_x = ref.x - car_length * cos(ref.yaw);
-    double prev_car_y = ref.y - car_length * sin(ref.yaw);
-
-    localwp_x.push_back(prev_car_x);
-    localwp_x.push_back(ref.x);
-    localwp_y.push_back(prev_car_y);
-    localwp_y.push_back(ref.y);
+  string map_file_ = "../data/highway_map.csv";
+  if (argc > 1 && strcmp(argv[1], "-b") == 0) {
+    map_file_ = "../data/highway_map_bosch1.csv";
+    cout << "\nLoading ../data/highway_map_bosch1.csv\n";
+    cout << "Download Bosch simulator from https://github.com/udacity/Bosch-Challenge/releases\n";
   }
   else {
-    // For subsequent steps, continue from previous path.
-
-    ref.x = previous_path_x[prev_size-1];
-    ref.y = previous_path_y[prev_size-1];
-
-    double prev_ref_x = previous_path_x[prev_size-2];
-    double prev_ref_y = previous_path_y[prev_size-2];
-    ref.yaw = atan2(ref.y - prev_ref_y, ref.x - prev_ref_x);
-
-    if (ref.x > prev_ref_x) {
-      localwp_x.push_back(prev_ref_x);
-      localwp_x.push_back(ref.x);
-      localwp_y.push_back(prev_ref_y);
-      localwp_y.push_back(ref.y);
-    }
-  }
-  vector<double> ref_sd = getFrenet(ref.x, ref.y, ref.yaw,
-                                    map_waypoints_x, map_waypoints_y);
-  ref.s = ref_sd[0];
-  ref.d = ref_sd[1];
-
-  // From this point on, use reference positions to decide on things.
-  // In other words, make decisions based on the last point in waypoint.
-  // Switch state step
-  cout << "Current lane: " << d2lane(ref.d) << endl;
-  switch(state) {
-    case STATE_CS: {
-      break;
-    }
-    case STATE_KL: {
-      this->RealizeKeepLane(other_cars, ref, snap);
-      break;
-    }
-    case STATE_LCL: {
-      if (d2lane(ref.d) > 0) {
-        cout << "about to realize LCL" << endl;
-        this->RealizeLaneChange(other_cars, -1, ref, snap);
-      }
-      break;
-    }
-    case STATE_LCR: {
-      if (d2lane(ref.d) < 2) {
-        this->RealizeLaneChange(other_cars, 1, ref, snap);
-      }
-      break;
-    }
-    default: {
-
-    }
+    cout << "\nLoading ../data/highway_map.csv\n";
+    cout << "Download Udacity simulator from https://github.com/udacity/self-driving-car-sim/releases\n";
+    cout << "Find \"Term 3 Simulator\" there.\n";
+    cout << "To load Bosch data, run with -b\n";
   }
 
-  ref.v = (*snap).config.target_speed;
+  // The max s value before wrapping around the track back to 0
+  double max_s = 6945.554;
 
-  cout << "target lane: " << (*snap).config.target_lane << endl;
+  ifstream in_map_(map_file_.c_str(), ifstream::in);
 
-  // ===PARAMETERS===
-  // All these parameters will have been changed by the switch state step above.
-  // They are used in changing the trajectory.
- 
-  // Current velocity in meter/second.
-  double &cur_v = (*snap).position.v;
-
-  // double ref_yaw = 0.0;
-
-  // Current lane: 0 - left, 1 - center, 2 - right
-  int &lane = (*snap).config.target_lane;
-
-  // Number of waypoints.
-  int &num_wp = (*snap).config.num_wp;
-
-  // Spline anchors
-  int &spline_anchors = (*snap).config.spline_anchors;
-  double &anchor_distance = (*snap).config.anchor_distance;
-
-  double &dt = (*snap).config.dt;
-
-  double &max_a = (*snap).config.max_acceleration;
-
-  // ===END===
-  
-  // Place anchor points. They are located ahead of the car.
-  // cout << "Before pushing anchors, num of x: " << localwp_x.size() << endl;
-  // cout << "x values:" << endl;
-  // for (int i=0; i<localwp_x.size(); ++i) {
-  //   cout << localwp_x[i] << endl;
-  // }
-
-  for (int i = 1; i <= spline_anchors; ++i) {
-    vector<double> next_xy = getXY(ref.s+i*anchor_distance, lane2d(lane),
-                                   map_waypoints_s, map_waypoints_x,
-                                   map_waypoints_y);
-
-    // cout << "push back x (" << "anchor dist: " <<
-    //         anchor_distance << ", i: "<< i << "): " << next_xy[0] << endl;
-    localwp_x.push_back(next_xy[0]);
-    localwp_y.push_back(next_xy[1]);
+  string line;
+  while (getline(in_map_, line)) {
+    istringstream iss(line);
+    double x;
+    double y;
+    float s;
+    float d_x;
+    float d_y;
+    iss >> x;
+    iss >> y;
+    iss >> s;
+    iss >> d_x;
+    iss >> d_y;
+    map_waypoints_x.push_back(x);
+    map_waypoints_y.push_back(y);
+    map_waypoints_s.push_back(s);
+    map_waypoints_dx.push_back(d_x);
+    map_waypoints_dy.push_back(d_y);
   }
 
-  // Shift and rotate reference to 0 degree and origin coordinate.
-  for (int i = 0; i < localwp_x.size(); ++i) {
-    double shift_x = localwp_x[i] - ref.x;
-    double shift_y = localwp_y[i] - ref.y;
-    localwp_x[i] = (shift_x * cos(0 - ref.yaw) - shift_y * sin(0 - ref.yaw));
-    localwp_y[i] = (shift_x * sin(0 - ref.yaw) + shift_y * cos(0 - ref.yaw));
-  }
+  World world;
+  world.map_waypoints_x = &map_waypoints_x;
+  world.map_waypoints_y = &map_waypoints_y;
+  world.map_waypoints_s = &map_waypoints_s;
+  world.map_waypoints_dx = &map_waypoints_dx;
+  world.map_waypoints_dy = &map_waypoints_dy;
 
-  // Speed trajectory. We assume that the speed
-  // follows a linear trajectory. From the calculation below
-  // we get the total required acceleration to reach target speed.
-  double total_time = dt * num_wp;
-  double dv = ref.v - cur_v;
-  double req_accel = dv / total_time;
-  // cout << "n leftover waypoints: " << prev_size << endl;
-  // cout << "car position [x,y]: [" << ref.x << ", " << ref.y <<
-  //         "]"<< endl;
-  // cout << "current v: " << cur_v << " target v: " << ref.v << endl;
-  // cout << "total time (sec): " << total_time << endl;
-  // cout << "required acceleration: " << req_accel << endl;
-  // Since the car needs to adhere to a maximum acceleration,
-  // we substract max acceleration from required acceleration
-  // in each second.
+  // init(*world.map_waypoints_s, *world.map_waypoints_x, *world.map_waypoints_y);
 
-  // Spline for position
-  tk::spline spline_pos;
+  h.onMessage([&world](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+                     uWS::OpCode opCode) {
+    // Initial experiment - see if frenet conversion works:
+    // TestFrenetConversion1(world);
+    // exit(0);
 
-  // PruneWaypoint(&localwp_x, &localwp_y);
+    // "42" at the start of the message means there's a websocket message event.
+    // The 4 signifies a websocket message
+    // The 2 signifies a websocket event
+    //auto sdata = string(data).substr(0, length);
+    //cout << sdata << endl;
+    if (length && length > 2 && data[0] == '4' && data[1] == '2') {
+      auto s = hasData(data);
 
-  // There are some problems with the trajectory e.g.
-  // x points are not sorted or there are duplicates.
-  // This could be caused by the car running too
-  // slow.
-  // cout << "Car speed at error: " << cur_v << endl;
+      if (s != "") {
+        auto j = json::parse(s);
+        
+        string event = j[0].get<string>();
+        
+        if (event == "telemetry") {
+          // clock_t begin = clock();
+          // j[1] is the data JSON object
 
-  // cout << "num of x: " << localwp_x.size() << endl;
-  // cout << "x values:" << endl;
-  // for (int i=0; i<localwp_x.size(); ++i) {
-  //   cout << localwp_x[i] << endl;
-  // }
-  cout << "stdev of local x and y: " << stdev(localwp_x) <<
-    " | " << stdev(localwp_y) << endl;
-  spline_pos.set_points(localwp_x, localwp_y);
+          // Main car's localization Data
+          double car_x = j[1]["x"];
+          double car_y = j[1]["y"];
+          double car_s = j[1]["s"];
+          double car_d = j[1]["d"];
+          double car_yaw = j[1]["yaw"];
+          double car_speed = j[1]["speed"];
 
-  // Re-include previous waypoints if any.
-  for (int i = 0; i < prev_size; ++i) {
-    t.x.push_back(previous_path_x[i]);
-    t.y.push_back(previous_path_y[i]);
-    vector<double> point_sd = getFrenet(previous_path_x[i],
-                                        previous_path_y[i], ref.yaw,
-                                        map_waypoints_x, map_waypoints_y);
-    t.s.push_back(point_sd[0]);
-    t.d.push_back(point_sd[1]);
-    if (i > 0) {
-      t.distance += distance(t.x[i-1], t.y[i-1], t.x[i], t.y[i]);
-    }
-  }
+          // Previous path data given to the Planner
+          auto previous_path_x = j[1]["previous_path_x"];
+          auto previous_path_y = j[1]["previous_path_y"];
 
-  cout << "prev_size: " << prev_size << endl;
-  cout << "size of prev path: " << previous_path_x.size() << endl;
-  // cout << "previous path s distance: " << (t.s[prev_size-1] - t.s[0]) << endl;
+          double end_path_s = j[1]["end_path_s"];
+          double end_path_d = j[1]["end_path_d"];
 
-  // Create target position in front of the car
-  double target_x = (*snap).config.target_x;
-  cout << "target_x: " << target_x << endl;
-  double target_y = spline_pos(target_x);
-  double target_dist = sqrt((target_x) * (target_x) + (target_y) * (target_y));
-  cout << "target dist: " << target_dist << endl;
-  cout << "max a: " << max_a << " target_v: " << ref.v << endl;
-  cout << "ref.x: " << ref.x << " ref.y: " << ref.y << " ref.yaw " << ref.yaw << endl;
+          // Sensor Fusion Data, a list of all other cars on the same side of the road.
+          // Each car contains this data: [id, x, y, vx, vy, s, d]
+          auto sensor_fusion = j[1]["sensor_fusion"];
 
-  /**
-   * The path between the car and the target contains several points.
-   * In the code below we place these points onto this path.
-   * One thing to note here is that the car has a maximum acceleration
-   * it can use, so there is no guarantee that the car
-   * will reach the target distance specified above. 
-   */ 
-  // x distance traveled so far in the loop.
-  double x_so_far = 0;
-  for (int i = 0; i < num_wp - prev_size; ++i) {
-    double v;
-    if (dv < 0) {
-      // cout << "decelerate by " << (dt * max_a) << endl;
-      v = cur_v - (dt * i * max_a);
-    }
-    else {
-      // cout << "accelerate by " << (dt * max_a) << endl;
-      v = min(cur_v + (dt * i * max_a), ref.v);
-    }
-    double point_dist = (dt * v);
-    double point_x = min((x_so_far + point_dist), target_x);
-    // cout << "point_x: " << point_x << endl;
+          vector<double> next_x_vals;
+          vector<double> next_y_vals;
 
-    // We do not want to predict any points beyond the target.
-    // This is useful for later cost calculation, to decide
-    // which path travels the farthest.
-    // cout << "x so far: " << x_so_far << endl;
-    if (x_so_far <= 30) {
-      double point_y = spline_pos(point_x);
+          json msgJson;
 
-      x_so_far = point_x;
+          int prev_size = previous_path_x.size();
 
-      // Rotate back to world coordinates.
-      double temp_x = point_x;
-      double temp_y = point_y;
-      point_x = (temp_x * cos(ref.yaw) - temp_y * sin(ref.yaw));
-      point_y = (temp_x * sin(ref.yaw) + temp_y * cos(ref.yaw));
+          // Time each simulation step in seconds.
+          double dt = 0.02;
 
-      point_x += ref.x;
-      point_y += ref.y;
+          // Length between front and rear wheels in meter.
+          double car_length = 1.0;
 
-      // cout << endl << "point_x is " << point_x << endl; 
-      vector<double> point_sd = getFrenet(point_x, point_y, ref.yaw,
-                                          map_waypoints_x, map_waypoints_y);
-      t.x.push_back(point_x);
-      t.y.push_back(point_y);
-      t.s.push_back(point_sd[0]);
-      t.d.push_back(point_sd[1]);
-      t.distance += point_dist;
-    }
-    else {
-      cout << i << endl;
-      break;
-    }
-  }
+          EgoConfig ego_config;
+          ego_config.default_target_speed = mph2mps(45.5);
+          ego_config.default_max_acceleration = 9.0;
+          ego_config.target_speed = mph2mps(45.5); // mps
+          ego_config.dt = dt;
+          ego_config.car_length = car_length;
+          ego_config.max_jerk = 8.0; // m/s^3
+          ego_config.previous_path_x = &previous_path_x;
+          ego_config.previous_path_y = &previous_path_y;
+          ego_config.end_path_s = &end_path_s;
+          ego_config.end_path_d = &end_path_d;
+          ego_config.target_lane = d2lane(car_d);
 
-  // The code below shows the difference between trailing distance and calculated
-  // from s. The difference was almost 10 meters!
-  double s1 = t.s[t.s.size()-1];
-  double s2 = t.s[0];
-  double dist = (s1 - s2);
-  cout << "After creation, trajectory dist (from s|trailing): " <<
-    dist << "|" << t.distance << endl;
-  // Output for 1st run:
-  // After creation, trajectory dist (from s|trailing): 35.1848|16.929
+          // Number of waypoints.
+          ego_config.num_wp = 100;
+          ego_config.num_pp = 50;
 
-  // cout << "After creation, num trajectory points: " << t.s.size() << endl;
+          // ego_config.num_last_path = 50;
 
-  // cout << endl << "trajectory [x, y]: " << endl;
-  // for (int i; i < t.x.size(); ++i) {
-  //   cout << t.x[i] << ", " << t.y[i] << endl;
-  // }
-  // cout << endl;
+          // Horizon and spline anchors are used to create
+          // temporary trajectory that starts from the end of
+          // a waypoints line.
+          ego_config.spline_anchors = 3;
+          ego_config.horizon = 50.0;
+          ego_config.anchor_ddist_threshold = 2.0;
 
-  return t;
-}
+          // target_x points to horizon when there is nothing ahead,
+          // but otherwise set this to a car in front of ego car.
+          ego_config.target_x = ego_config.horizon;
 
-void EgoCar::RealizeKeepLane(const vector<OtherCar> &other_cars,
-                             const Position &ref, Snapshot *snap) {
-  // Set max acceleration to the car in front of ego car.
-  (*snap).config.target_speed = this->TargetSpeedForLane(other_cars, ref, snap);
-}
+          // ===START===
 
-bool EgoCar::is_behind(const OtherCar &car) {
-  // TODO: Does higher s always mean in front of the car?
-  return (this->position.s < car.position.s);
-}
+          // AssertMapCorrectness(world.map_waypoints_s);
 
-double EgoCar::TargetSpeedForLane(const vector<OtherCar> &other_cars,
-                                  const Position &ref, Snapshot *snap) {
+          // ---INIT EGO---
+          Position pos;
+          pos.x = car_x;
+          pos.y = car_y;
+          pos.s = car_s;
+          pos.d = car_d;
 
-  // Find the closest car in the same lane and ahead of the ego car.
-  bool found_car = false;
-  double distance = DBL_MAX;
-  OtherCar closest_car;
-  for (OtherCar const& car : other_cars) {
-    if (car.config.target_lane == (*snap).config.target_lane &&
-        this->is_behind(car)) {
-      // Initial setting, register the first car found.
-      if (found_car == false) {
-        closest_car = car;
-      }
-      double new_distance = abs(closest_car.position.s - ref.s);
+          // Find car speed based on previous positions
+          // I think this has been done in the last section of
+          // `CreateTrajectories` but unsure so let's comment it for now.
+          // if (prev_size == 0) {
+          //   pos.vx = 0;
+          //   pos.vy = 0;
+          //   pos.a = 0;
+          // }
+          // else {
+          //   double x1 = (double)previous_path_x[prev_size-1];
+          //   double x2 = (double)previous_path_x[prev_size-2];
+          //   double x3 = (double)previous_path_x[prev_size-3];
+          //   double y1 = (double)previous_path_y[prev_size-1];
+          //   double y2 = (double)previous_path_y[prev_size-2];
+          //   double y3 = (double)previous_path_y[prev_size-3];
+          //   pos.vx = (x1 - x2)/dt;
+          //   pos.vy = (y1 - y2)/dt;
+          //   pos.v = sqrt((pos.vx*pos.vx) + (pos.vy*pos.vy));
 
-      if (new_distance < distance && new_distance < (*snap).config.car_length*5) {
-        closest_car = car;
-        found_car = true;
-        // cout << "closest car id: " << closest_car.config.id <<
-        //         " distance (prev|new): " << distance << "|" <<
-        //         new_distance << " car speed: " <<
-        //         closest_car.position.v << endl;
-        // cout << "s(this|closest car): " << ref.s << "|" <<
-        //         closest_car.position.s << endl;
-        distance = new_distance;
+          //   double vx1 = (x2 - x3)/dt;
+          //   double vy1 = (y2 - y3)/dt;
+          //   pos.a = distance(pos.vx, pos.vy, vx1, vy1)/dt;
+          //   // cout << "v: " << pos.v << endl;
+          //   // cout << "target speed (meter/seconds): " << mph2mps(49.5) << endl;
+          // }
+
+          // cout << "ego car vx, vy: " << pos.vx << ", " << pos.vy << endl;
+
+          pos.yaw = deg2rad(car_yaw);
+
+          EgoCar ego = EgoCar(world, pos, ego_config);
+          // ---END---
+
+          // ---INIT OTHER VEHICLES---
+          vector<OtherCar> other_cars;
+          for (int i = 0; i < sensor_fusion.size(); ++i) {
+            OtherConfig car_config;
+            car_config.dt = dt;
+            car_config.id = sensor_fusion[i][0];
+
+            // In a real project, car length should depend on
+            // sensor fusion data.
+            car_config.car_length = car_length;
+            Position pos;
+            pos.x = sensor_fusion[i][1];
+            pos.y = sensor_fusion[i][2];
+            pos.s = sensor_fusion[i][5];
+            pos.d = sensor_fusion[i][6];
+            pos.vx = sensor_fusion[i][3];
+            pos.vy = sensor_fusion[i][4];
+            pos.v = sqrt((pos.vx * pos.vx) + (pos.vy * pos.vy));
+            pos.yaw = 0.0;
+            car_config.target_lane = d2lane(pos.d);
+            OtherCar car = OtherCar(world, pos, car_config);
+            other_cars.push_back(car);
+          }
+          // ---END---
+
+          CostWeights weights;
+          weights.collision = 1.0;
+          weights.efficiency = 0.9;
+          weights.max_accel = 0.8;
+          weights.max_jerk = 0.5;
+          weights.change_state = 5.0;
+
+          Trajectory best_trajectory = ego.PlanTrajectory(other_cars, weights);
+
+          // cout << "\rhellow" << flush;
+          // cout << "\rcar1 x: " << other_cars[0].position.x << flush;
+          // cout << "\rcar1 y: " << other_cars[0].position.y << flush;
+            // "\nv: " << car_speed <<
+            // "\nvx: " << ego.position.vx <<
+            // "\nvy " << ego.position.vy << flush;
+
+          // cout << "Current state: " << State2Str(ego.state) << endl;
+
+          for (int i = 0; i < best_trajectory.x.size(); ++i) {
+            next_x_vals.push_back(best_trajectory.x[i]);
+            next_y_vals.push_back(best_trajectory.y[i]);
+          }
+
+          cout << next_x_vals[0] << " to "
+            << next_x_vals[next_x_vals.size()-1] << endl;
+
+          cout << endl << "final [x, y] (" << next_x_vals.size() << ") " << endl;
+          for (int i=0; i < next_x_vals.size(); ++i) {
+            cout << next_x_vals[i] << ", " << next_y_vals[i] << endl;
+          }
+          cout << endl;
+
+          // ===END===
+
+          msgJson["next_x"] = next_x_vals;
+          msgJson["next_y"] = next_y_vals;
+
+          auto msg = "42[\"control\","+ msgJson.dump()+"]";
+          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          // this_thread::sleep_for(chrono::milliseconds(1000));
+
+          // clock_t end = clock();
+          // double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+          // cout << "time: " << elapsed_secs << endl;
+
+        } else {
+          // Manual driving
+          std::string msg = "42[\"manual\",{}]";
+          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+        }
       }
     }
+  });
+
+  // We don't need this since we're not using HTTP but if it's removed the
+  // program
+  // doesn't compile :-(
+  h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data,
+                     size_t, size_t) {
+    const std::string s = "<h1>Hello world!</h1>";
+    if (req.getUrl().valueLength == 1) {
+      res->end(s.data(), s.length());
+    } else {
+      // i guess this should be done more gracefully?
+      res->end(nullptr, 0);
+    }
+  });
+
+  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
+    std::cout << "Connected!!!" << std::endl;
+  });
+
+  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code,
+                         char *message, size_t length) {
+    ws.close();
+    std::cout << "Disconnected" << std::endl;
+  });
+
+  int port = 4567;
+  if (h.listen(port)) {
+    std::cout << "Listening to port " << port << std::endl;
+  } else {
+    std::cerr << "Failed to listen to port" << std::endl;
+    return -1;
   }
-
-  if (found_car == false) {
-    return (*snap).config.target_speed;  
-  }
-  else {
-    // cout << "Should set target speed to " << closest_car.position.v << endl;
-    (*snap).config.target_x = closest_car.position.x;
-    (*snap).config.anchor_distance = distance;
-    return closest_car.position.v;
-  }
-  
-}
-
-void EgoCar::RealizeLaneChange(const vector<OtherCar> &other_cars,
-                               int num_lanes, const Position &ref, Snapshot *snap) {
-  // If the next line is empty, then it is time to consider line change.
-
-  (*snap).config.target_lane = d2lane((*snap).position.d) + num_lanes;
-
-  // anchor_distance defines how sharp the turn should be. The smaller, the sharper.
-  (*snap).config.anchor_distance = 10.0;
-
-  // Turning would naturally result in smaller acceleration.
-  // TODO: Find this decrease value with the right physics.
-  (*snap).config.max_acceleration = 0.95 * (*snap).config.max_acceleration;
+  h.run();
 }
