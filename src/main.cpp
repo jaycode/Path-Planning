@@ -36,11 +36,11 @@ int main(int argc, char *argv[]) {
   if (argc > 1 && strcmp(argv[1], "-b") == 0) {
     map_file_ = "../data/highway_map_bosch1.csv";
     cout << "\nLoading ../data/highway_map_bosch1.csv\n";
-    cout << "Download Bosch simulator from https://github.com/udacity/Bosch-Challenge/releases\n";
+    cout << "If you don't yet have it, you may download Bosch simulator from https://github.com/udacity/Bosch-Challenge/releases\n";
   }
   else {
     cout << "\nLoading ../data/highway_map.csv\n";
-    cout << "Download Udacity simulator from https://github.com/udacity/self-driving-car-sim/releases\n";
+    cout << "If you don't yet have it, you may download Udacity simulator from https://github.com/udacity/self-driving-car-sim/releases\n";
     cout << "Find \"Term 3 Simulator\" there.\n";
     cout << "To load Bosch data, run with -b\n";
   }
@@ -135,12 +135,12 @@ int main(int argc, char *argv[]) {
           double car_length = 1.0;
 
           EgoConfig ego_config;
-          ego_config.default_target_speed = mph2mps(45.5);
-          ego_config.default_max_acceleration = 6.0;
+          ego_config.default_target_speed = mph2mps(49.5);
+          ego_config.default_max_acceleration = 9.0;
           ego_config.target_speed = mph2mps(45.5); // mps
           ego_config.dt = dt;
           ego_config.car_length = car_length;
-          ego_config.max_jerk = 5.0; // m/s^3
+          ego_config.max_jerk = 9.0; // m/s^3
           ego_config.previous_path_x = &previous_path_x;
           ego_config.previous_path_y = &previous_path_y;
           ego_config.end_path_s = &end_path_s;

@@ -97,6 +97,17 @@ typedef struct EgoConfig : Config {
   // Spline anchors
   int spline_anchors;
   double horizon;
+
+  // If true, use the spline anchors defined below.
+  bool override_spline_anchors = false;
+  std::vector<std::tuple<double, double>> active_spline_anchors;
+  
+  bool use_spline_v = false;
+  std::vector<std::tuple<double, double>> spline_v_anchors;
+
+  bool use_spline_a = false;
+  std::vector<std::tuple<double, double>> spline_a_anchors;
+
   // If the difference of anchor distance of xy and sd positions
   // are higher than this value, then something is wrong in
   // Frenet to XY conversion (`getXY()` function). The car must be
@@ -110,6 +121,13 @@ typedef struct EgoConfig : Config {
 
   // When following a car, what's the distance to keep?
   double follow_distance = 8;
+
+  std::map<ego::State, double> state_durations = {
+    {ego::STATE_KL, 0.0},
+    {ego::STATE_LCL, 0.0},
+    {ego::STATE_LCR, 0.0},
+    {ego::STATE_FC, 0.0}
+  };
 
 } EgoConfig;
 

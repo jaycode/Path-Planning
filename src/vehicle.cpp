@@ -104,6 +104,14 @@ State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
     this->InitFromSnapshot(initial_snap);
   }
 
+  // When a state is chosen, set other states' durations to 0.
+  for ( int state = 0; state != ENUM_END; state++ ) {
+    if ((State)state != best_state) {
+      best_snap.config.state_durations[(State)state] = 0.0;
+      cout << "Reset duration of state " << State2Str((State)state) << " to 0.";
+    }
+  }
+
   cout << endl << "Chosen State: " << State2Str((State)best_state) << endl << "-----" << endl << endl;
   // cout << "chosen target speed: " << best_snap.config.target_speed << endl;
   // cout << "Target lane: " << best_snap.config.target_lane << " or in d: " << lane2d(best_snap.config.target_lane) << endl;
@@ -244,39 +252,48 @@ void EgoCar::CreateTrajectories(State state,
   // will be used to choose a best state in the behavior selection step.
   int num_points_to_imagine = num_points_to_draw + num_pp;
 
-  // Spline anchors
-  int &spline_anchors = (*snap).config.spline_anchors;
-  double anchor_distance = ((*snap).config.horizon / spline_anchors);
-
   double &dt = (*snap).config.dt;
 
   double max_a = (*snap).config.max_acceleration;
 
   double max_j = (*snap).config.max_jerk;
 
+  // Duration in seconds in a state. Useful for determining speed.
+  double sdt = (*snap).config.state_durations[state];
+
   // ===END===
   
-  for (int i = 1; i <= spline_anchors; ++i) {
-    vector<double> next_xy = getXY(ref.s+i*anchor_distance, lane2d(lane),
-                                   map_waypoints_s, map_waypoints_x,
-                                   map_waypoints_y);
+  if ((*snap).config.override_spline_anchors == false) {
+    // Spline anchors are placed with some distance between each pair.
+    int &spline_anchors = (*snap).config.spline_anchors;
+    double anchor_distance = ((*snap).config.horizon / spline_anchors);
 
-    vector<double> next_sd = getFrenet(next_xy[0], next_xy[1],
-                                   ref.yaw, map_waypoints_x,
-                                   map_waypoints_y);
-
-    // Compare sd and xy distances:
-    double x2 = next_xy[0];
-    double y2 = next_xy[1];
-
-    localwp_x.push_back(x2);
-    localwp_y.push_back(y2);
+    for (int i = 1; i <= spline_anchors; ++i) {
+      vector<double> next_xy = getXY(ref.s+i*anchor_distance, lane2d(lane),
+                                     map_waypoints_s, map_waypoints_x,
+                                     map_waypoints_y);
+      localwp_x.push_back(next_xy[0]);
+      localwp_y.push_back(next_xy[1]);
+    }
+  }
+  else {
+    // Distance so far
+    double sum_s = 0.0;
+    for (int i = 0; i < (*snap).config.active_spline_anchors.size(); ++i) {
+      sum_s += get<0>((*snap).config.active_spline_anchors[i]);
+      vector<double> next_xy = getXY(ref.s + sum_s,
+                                     get<1>((*snap).config.active_spline_anchors[i]),
+                                     map_waypoints_s, map_waypoints_x,
+                                     map_waypoints_y);
+      localwp_x.push_back(next_xy[0]);
+      localwp_y.push_back(next_xy[1]);
+    }
   }
 
   // cout << "Anchor points:" << endl;
   // for (int i = 0; i < localwp_x.size(); ++i) {
   //   cout << localwp_x[i] << endl;
-  // }
+  // }    
 
   // Shift and rotate reference to 0 degree and origin coordinate.
   for (int i = 0; i < localwp_x.size(); ++i) {
@@ -296,9 +313,11 @@ void EgoCar::CreateTrajectories(State state,
   // Spline for position
   tk::spline spline_pos;
 
+
   PruneWaypoint(&localwp_x, &localwp_y);
 
   spline_pos.set_points(localwp_x, localwp_y);
+
 
   // Re-include previous waypoints if any.
   for (int i = 0; i < prev_size; ++i) {
@@ -321,6 +340,37 @@ void EgoCar::CreateTrajectories(State state,
                                    (*plan).x[i], (*plan).y[i]);
     }
   }
+
+  // Spline for velocity and time.
+  tk::spline spline_v;
+  if ((*snap).config.use_spline_v == true) {
+    double sum_t = 0.0;
+    vector<double> v_axis;
+    vector<double> t_axis;
+    for (int i = 0; i < (*snap).config.spline_v_anchors.size(); ++i) {
+      sum_t += get<0>((*snap).config.spline_v_anchors[i]);
+      double v = get<1>((*snap).config.spline_v_anchors[i]);
+      t_axis.push_back(sum_t);
+      v_axis.push_back(v);
+    }
+    spline_v.set_points(t_axis, v_axis);
+  }
+
+  // Spline for acceleration and time.
+  tk::spline spline_a;
+  if ((*snap).config.use_spline_a == true) {
+    double sum_t = 0.0;
+    vector<double> a_axis;
+    vector<double> t_axis;
+    for (int i = 0; i < (*snap).config.spline_a_anchors.size(); ++i) {
+      sum_t += get<0>((*snap).config.spline_a_anchors[i]);
+      double a = get<1>((*snap).config.spline_a_anchors[i]);
+      t_axis.push_back(sum_t);
+      a_axis.push_back(a);
+    }
+    spline_a.set_points(t_axis, a_axis);
+  }
+
 
   // Create target position in front of the car
   double target_x = (*snap).config.target_x;
@@ -345,23 +395,39 @@ void EgoCar::CreateTrajectories(State state,
   double x_so_far = 0;
   // Number of points to draw as waypoints.
   for (int i = 0; i < num_points_to_imagine ; ++i) {
-    double v;
+    sdt += dt;
     double a;
-    if (dv < 0) {
-      a = cur_a - (dt * i * max_j);
-    } {
-      a = min(cur_a + (dt * i * max_j), max_a);
+    double v;
+    if ((*snap).config.use_spline_a == true){
+      a = spline_a(sdt);      
+      v = min(cur_v + (sdt/dt * a), ref.v);
+      cout << "accel at time " << sdt << "s (point " <<
+        (int)(sdt / dt) << "): " << a << " speed: " <<
+        v << endl;
     }
-
-    if (dv < 0) {
-      // cout << "decelerate by " << (dt * max_a) << endl;
-      v = cur_v - (dt * i * a);
+    else if ((*snap).config.use_spline_v == true){
+      v = spline_v(sdt);
+      cout << "speed at time " << sdt << "s (point " << 
+        (int)(sdt / dt) << "): " << v << endl;
     }
     else {
-      // cout << "accelerate by " << (dt * max_a) << endl;
-      v = min(cur_v + (dt * i * max_a), ref.v);
+      if (dv < 0) {
+        a = cur_a - (dt * i * max_j);
+      } {
+        a = min(cur_a + (dt * i * max_j), max_a);
+      }
+
+      if (dv < 0) {
+        // cout << "decelerate by " << (dt * max_a) << endl;
+        v = cur_v - (dt * i * a);
+      }
+      else {
+        // cout << "accelerate by " << (dt * max_a) << endl;
+        v = min(cur_v + (dt * i * max_a), ref.v);
+      }
     }
-    // cout << "speed: " << v << endl;
+
+
     double point_dist = (dt * v);
     double point_x = min((x_so_far + point_dist), target_x);
     // cout << "point_x: " << point_x << endl;
@@ -421,6 +487,13 @@ void EgoCar::CreateTrajectories(State state,
                          (*waypoints).y[(*waypoints).y.size()-3]) / dt;
     (*snap).position.a = (v2 - v1) / dt;
   }
+
+  // Update state durations
+  (*snap).config.state_durations[state] = sdt;
+
+
+
+
   // if (state == STATE_LCR) {
   //   cout << "stored tj lane: " << d2lane(t.d[t.d.size()-1]) << endl;
   //   debug_iter++;
@@ -461,28 +534,130 @@ void EgoCar::CreateTrajectories(State state,
 
 void EgoCar::RealizeKeepLane(const vector<OtherCar> &other_cars,
                              const Position &ref, Snapshot *snap) {
+  (*snap).config.override_spline_anchors = false;
+  (*snap).config.use_spline_v = false;
+  (*snap).config.use_spline_a = true;
+  (*snap).config.override_spline_anchors = false;
   (*snap).config.max_acceleration = (*snap).config.default_max_acceleration;
   (*snap).config.target_speed = (*snap).config.default_target_speed;
-  (*snap).config.target_lane = d2lane(ref.d);
+  (*snap).config.target_lane = d2lane((*snap).position.d );
+  (*snap).config.num_wp = 40;
+  (*snap).config.num_pp = 40;
+
+  // Lane
+
+  // Trajectory to use:
+  // https://www.desmos.com/calculator/kdlhxlwutv
+  // vector<tuple<double, double>> pos_anchors;
+  // pos_anchors.push_back(make_tuple(7, (*snap).position.d ));
+  // pos_anchors.push_back(make_tuple(12, (*snap).position.d ));
+  // pos_anchors.push_back(make_tuple(8, (*snap).position.d ));
+  // (*snap).config.active_spline_anchors = pos_anchors;
+
+  // Velocity
+
+  // vector<tuple<double, double>> spline_v_anchors;
+  // double target_v = (*snap).config.target_speed;
+  // double dt = (*snap).config.dt;
+
+  // spline_v_anchors.push_back(make_tuple(-dt, 0.01 * target_v));
+  // spline_v_anchors.push_back(make_tuple(20/dt, 0.01 * target_v));
+  // spline_v_anchors.push_back(make_tuple(40/dt, 0.015 * target_v));
+  // spline_v_anchors.push_back(make_tuple(15/dt, 0.08 * target_v));
+  // // spline_v_anchors.push_back(make_tuple(25/dt, 0.12 * target_v));
+  // // spline_v_anchors.push_back(make_tuple(pts/dt, 0.3 * target_v));
+  // spline_v_anchors.push_back(make_tuple(100/dt, 1.0 * target_v));
+
+  // (*snap).config.spline_v_anchors = spline_v_anchors;
+
+  // Acceleration
+  // Division with dt gives us seconds, basically. I used it so it is
+  // easier to imagine. I found the coefficients below from trial and error.
+
+  vector<tuple<double, double>> spline_a_anchors;
+  double target_a = (*snap).config.max_acceleration;
+  double dt = (*snap).config.dt;
+
+  spline_a_anchors.push_back(make_tuple(-dt, 0.02 * target_a));
+  spline_a_anchors.push_back(make_tuple(0.5/dt, (0.03) * target_a));
+  spline_a_anchors.push_back(make_tuple(4000/dt, 1.0 * target_a));
+
+  (*snap).config.spline_a_anchors = spline_a_anchors;
+
 }
+
+// void EgoCar::RealizeFollowCar(const vector<OtherCar> &other_cars,
+//                               const Position &ref, Snapshot *snap) {
+//   (*snap).config.override_spline_anchors = false;
+//   // Similar to RealizeKeepLane but find a car to follow.
+//   double minimum_distance = (*snap).config.follow_distance;
+//   vector<int> lanes = {d2lane(ref.d)};
+//   (*snap).config.max_acceleration = config.default_max_acceleration;
+//   // Set target speed to the car in front of ego car.
+//   (*snap).config.target_lane = d2lane(ref.d);
+//   vector<OtherCar> closest_car_v = this->FindClosestCar(
+//     other_cars, ref, snap, lanes, minimum_distance);
+//   if (closest_car_v.size() > 0) {
+//     OtherCar closest_car = closest_car_v[0];
+//     // cout << "Should set target speed to " << closest_car.position.v << endl;
+//     (*snap).config.target_x = abs(closest_car.position.s - (*snap).position.s);
+//     (*snap).config.target_speed = closest_car.position.v;
+//     // cout << "Set target speed to " << (*snap).config.target_speed << endl;
+//   }
+// }
 
 void EgoCar::RealizeFollowCar(const vector<OtherCar> &other_cars,
                               const Position &ref, Snapshot *snap) {
   // Similar to RealizeKeepLane but find a car to follow.
+
+  (*snap).config.override_spline_anchors = false;
+  (*snap).config.use_spline_a = false;
+  (*snap).config.use_spline_v = false;
+  (*snap).config.override_spline_anchors = false;
   double minimum_distance = (*snap).config.follow_distance;
-  vector<int> lanes = {d2lane(ref.d)};
   (*snap).config.max_acceleration = config.default_max_acceleration;
+
+  // vector<int> lanes = {d2lane(ref.d)};
+  vector<int> lanes = {0, 1, 2};
   // Set target speed to the car in front of ego car.
   (*snap).config.target_lane = d2lane(ref.d);
   vector<OtherCar> closest_car_v = this->FindClosestCar(
     other_cars, ref, snap, lanes, minimum_distance);
   if (closest_car_v.size() > 0) {
+    (*snap).config.use_spline_a = true;
     OtherCar closest_car = closest_car_v[0];
     // cout << "Should set target speed to " << closest_car.position.v << endl;
     (*snap).config.target_x = abs(closest_car.position.s - (*snap).position.s);
     (*snap).config.target_speed = closest_car.position.v;
     // cout << "Set target speed to " << (*snap).config.target_speed << endl;
+
+    // vector<tuple<double, double>> spline_v_anchors;
+    // double target_v = (*snap).config.target_speed;
+    // double dt = (*snap).config.dt;
+    // int num_pp = (*snap).config.num_pp;
+
+    // spline_v_anchors.push_back(make_tuple(-dt, 0.01 * target_v));
+    // spline_v_anchors.push_back(make_tuple(10*dt, 0.1 * target_v));
+    // spline_v_anchors.push_back(make_tuple(15*dt, 0.15 * target_v));
+    // spline_v_anchors.push_back(make_tuple(25*dt, 0.25 * target_v));
+    // spline_v_anchors.push_back(make_tuple(num_pp*dt, 0.35 * target_v));
+    // spline_v_anchors.push_back(make_tuple(num_pp*3*dt, target_v));
+
+    // (*snap).config.spline_v_anchors = spline_v_anchors;
+
+    vector<tuple<double, double>> spline_a_anchors;
+    double target_a = (*snap).config.max_acceleration;
+    double dt = (*snap).config.dt;
+
+    spline_a_anchors.push_back(make_tuple(-dt, 0.02 * target_a));
+    spline_a_anchors.push_back(make_tuple(0.5/dt, (0.03) * target_a));
+    spline_a_anchors.push_back(make_tuple(4000/dt, 0.5 * target_a));
+
+    (*snap).config.spline_a_anchors = spline_a_anchors;
+
   }
+
+
 }
 
 bool EgoCar::is_behind(const OtherCar &car) {
@@ -541,6 +716,7 @@ void EgoCar::RealizeLaneChange(const vector<OtherCar> &other_cars,
 
   // cout << "yaw at turns: " << ref.yaw << endl;
 
+  (*snap).config.use_spline_v = false;
   (*snap).config.target_x = 40.0;
   (*snap).config.horizon = 70.0;
   (*snap).config.target_lane = d2lane((*snap).position.d) + num_lanes;
@@ -549,4 +725,24 @@ void EgoCar::RealizeLaneChange(const vector<OtherCar> &other_cars,
   // TODO: Find this decrease value with the right physics.
   (*snap).config.max_acceleration = 0.80 * (*snap).config.default_max_acceleration;
   (*snap).config.target_speed = 0.8 * (*snap).config.default_target_speed;
+
+  (*snap).config.override_spline_anchors = true;
+
+  // Trajectory to use:
+  // https://www.desmos.com/calculator/kdlhxlwutv
+  vector<tuple<double, double>> pos_anchors;
+  if (num_lanes < 0) {
+    // Turn left
+    pos_anchors.push_back(make_tuple(3.5, (*snap).position.d - (1.5/2.0)*(*snap).position.d ));
+    pos_anchors.push_back(make_tuple(6, (*snap).position.d - (2.0)*(*snap).position.d ));
+    pos_anchors.push_back(make_tuple(4, (*snap).position.d - (2.5/4)*(*snap).position.d ));
+  }
+  else {
+    // Turn right
+    pos_anchors.push_back(make_tuple(3.5, (*snap).position.d + (1.5/2.0)*(*snap).position.d ));
+    pos_anchors.push_back(make_tuple(6, (*snap).position.d + (2.0)*(*snap).position.d ));
+    pos_anchors.push_back(make_tuple(4, (*snap).position.d + (2.5/4)*(*snap).position.d ));
+  }
+  (*snap).config.active_spline_anchors = pos_anchors;
+
 }
