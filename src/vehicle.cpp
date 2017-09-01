@@ -56,6 +56,7 @@ Trajectory EgoCar::PlanTrajectory(const vector<OtherCar> &other_cars,
   return waypoints;
 }
 
+
 int debug_iter = 0;
 State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
                               const ego::CostWeights &weights,
@@ -69,8 +70,12 @@ State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
   Snapshot best_snap;
 
   Trajectory current_best_waypoints;
+  vector<char> minimap = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
 
+  int ii = 0;
   for ( int state = 0; state != ENUM_END; state++ ) {
+    cout << "\n" << ii << ". Now calculating cost of state " << state << " / " << State2Str((State)state) << endl;
+    ii++;
     Snapshot cur_snap = this->getSnapshot();
     // For each state, the ego vehicle "imagines" following a trajectory
     Trajectory waypoints;
@@ -94,7 +99,10 @@ State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
     tuple<State, Snapshot, vector<OtherCar>> cf_state = 
       make_tuple(State(state), cur_snap, other_cars);
 
-    double cost = ego_cost::CalculateCost(cf_state, plan, weights);
+    vector<char> cur_minimap = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
+    double cost = ego_cost::CalculateCost(cf_state, plan, 
+      waypoints, weights, &cur_minimap);
+
     if (cost < best_cost) {
       best_state = (State)state;
       current_best_waypoints = waypoints;
@@ -103,6 +111,8 @@ State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
     }
     this->InitFromSnapshot(initial_snap);
   }
+  (*waypoints) = current_best_waypoints;
+  this->InitFromSnapshot(best_snap);
 
   // When a state is chosen, set other states' durations to 0.
   for ( int state = 0; state != ENUM_END; state++ ) {
@@ -112,16 +122,26 @@ State EgoCar::ChooseBestState(const vector<OtherCar> &other_cars,
     }
   }
 
-  cout << endl << "Chosen State: " << State2Str((State)best_state) << endl << "-----" << endl << endl;
+
+  cout <<
+  "-------------" << endl <<
+  "| "<< minimap[0] <<" | "<< minimap[1] <<" | "<< minimap[2] <<" |" << endl <<
+  "-------------" << endl <<
+  "| "<< minimap[3] <<" | "<< minimap[4] <<" | "<< minimap[5] <<" |" << endl <<
+  "-------------" << endl <<
+  "| "<< minimap[6] <<" | "<< minimap[7] <<" | "<< minimap[8] <<" |" << endl <<
+  "-------------" << endl;
+
   // cout << "chosen target speed: " << best_snap.config.target_speed << endl;
   // cout << "Target lane: " << best_snap.config.target_lane << " or in d: " << lane2d(best_snap.config.target_lane) << endl;
+  cout << endl << "Chosen State: " << State2Str((State)best_state) << endl;
+  // assert((*waypoints).x.size() > 0);
+  // cout << "The car will then move from xy of " << best_snap.position.x <<
+  //   ", " << best_snap.position.y << " to " <<
+  //   (*waypoints).x[0] << ", " <<
+  //   (*waypoints).y[0] << endl;
+  // cout << "-----" << endl << endl;
 
-  (*waypoints) = current_best_waypoints;
-  this->InitFromSnapshot(best_snap);
-
-  // if ((State)best_state != STATE_KL) {
-  //   exit(0);
-  // }
   return (State)best_state;
 }
 
@@ -744,3 +764,4 @@ void EgoCar::RealizeLaneChange(const vector<OtherCar> &other_cars,
     pos_anchors.push_back(make_tuple(4, (*snap).position.d + (2.5/4)*(*snap).position.d ));
   }
   (*snap).config.active_spline_anchors = pos_anchors;
+}
