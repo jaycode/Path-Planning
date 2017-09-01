@@ -8,6 +8,7 @@
 #include <vector>
 #include "json.hpp"
 #include "spline.h"
+#include <math.h>
 
 extern tk::spline sx;
 extern tk::spline sy;
@@ -81,12 +82,18 @@ typedef struct EgoConfig : Config {
   // meter / second^3
   double max_jerk = 0.0;
 
+  // radian DOESN'T WORK
+  // TODO: Fix yaw with polynomials.
+  double max_yaw = 30.0 * M_PI / 180;
+
   nlohmann::json *previous_path_x;
   nlohmann::json *previous_path_y;
   double *end_path_s;
   double *end_path_d;
 
   // Number of waypoints.
+  // DO NOT update in Vehicle state realization, since this is used
+  // for distance calculation when finding efficiency cost.
   int num_wp = 60;
 
   // Number of plan points ahead of the end of

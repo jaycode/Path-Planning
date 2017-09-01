@@ -50,19 +50,39 @@ double EfficiencyCost(const std::tuple<ego::State, ego::Snapshot, std::vector<eg
   double max_v = snap.config.default_target_speed;
   double max_a = snap.config.default_max_acceleration;
   double max_j = snap.config.max_jerk;
-  double t = dt * waypoints.s.size();
-  cout << "max_s = " << (t*max_v) << " + " << (0.5*max_a*t*t) << " + " <<
-    ((1/6)*max_j*t*t*t) << endl;
+
+  // With waypoints
+
+  // double t = dt * waypoints.s.size();
+  // // cout << "max_s = " << (t*max_v) << " + " << (0.5*max_a*t*t) << " + " <<
+  // //   ((1/6)*max_j*t*t*t) << endl;
+  // // x = x0 + v0*t + (1/2)*a0*t^2 + (1/6)*j*t^3
+  // double max_s = max_v*t + (0.5*max_a*t*t) + ((1/6)*max_j*t*t*t);
+  // // cout << "max_s = " << max_s << endl;
+  // // cout << "waypoints distance = " << waypoints.distance
+  // //      << " over " << t << " seconds" << endl;
+  // double cost = 0;
+  // if (waypoints.distance > 0) {
+  //   cost = fabs(max_s-waypoints.distance)/waypoints.distance * weight;
+  // }
+  // // cout << "cost: " << cost << endl;
+
+  // With plan
+  double t = dt * plan.s.size();
+  // cout << "max_s = " << (t*max_v) << " + " << (0.5*max_a*t*t) << " + " <<
+  //   ((1/6)*max_j*t*t*t) << endl;
   // x = x0 + v0*t + (1/2)*a0*t^2 + (1/6)*j*t^3
   double max_s = max_v*t + (0.5*max_a*t*t) + ((1/6)*max_j*t*t*t);
-  cout << "max_s = " << max_s << endl;
-  cout << "waypoints distance = " << waypoints.distance
-       << " over " << t << " seconds" << endl;
+  // cout << "max_s = " << max_s << endl;
+  // cout << "plan distance = " << plan.distance
+  //      << " over " << t << " seconds" << endl;
   double cost = 0;
-  if (waypoints.distance > 0) {
-    cost = fabs(max_s-waypoints.distance)/waypoints.distance * weight;
+  if (plan.distance > 0) {
+    cost = fabs(max_s-plan.distance)/plan.distance * weight;
   }
-  cout << "cost: " << cost << endl;
+  // cout << "cost: " << cost << endl;
+
+
   return cost;
 }
 
@@ -95,7 +115,7 @@ bool FindCarInCell(const vector<double> &target, double w1, double w2,
 double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego::OtherCar>> &cf_state, 
                      const ego::Trajectory &plan,
                      const ego::Trajectory &waypoints, double weight,
-                     vector<char> *minimap) {
+                     vector<char> *wp_minimap, vector<char> *ego_minimap) {
 
   double cost = 0.0;
   ego::Snapshot snap = get<1>(cf_state);
@@ -115,20 +135,20 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
 
   // vector<double> ref = {snap.position.s, snap.position.d};  
   vector<double> ref = {s_fin, d_fin};  
-
+  vector<double> ego_ref = {snap.position.s, snap.position.d};
 
   // === DIRECT COLLISION CHECK ===
   // See if another car is going to be in the imagined path.
   // TODO: Use actual path. For now just simply check if ther is a car near one of the
   //       waypoint positions.
 
-  double dist_threshold = 2.0;
+  double dist_crash_threshold = 2.0;
 
   for (int k = 0; k < cars.size(); ++k) {
     vector<double> car = {cars[k].position.s, cars[k].position.d};
     for (int i = 0; i < waypoints.s.size(); ++i) {
-      if (fabs(waypoints.s[i] - cars[k].position.s) < dist_threshold &&
-          fabs(waypoints.d[i] - cars[k].position.d) < dist_threshold 
+      if (fabs(waypoints.s[i] - cars[k].position.s) < dist_crash_threshold &&
+          fabs(waypoints.d[i] - cars[k].position.d) < dist_crash_threshold 
           && (cars[k].position.v < snap.position.v)
           ) {
         cout << "I detect a collision at s = " << waypoints.s[i] <<
@@ -160,7 +180,8 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
   int rows = 3;
   double cw = 4.0; // cell width
   double cl = 10.0; // cell length
-  dist_threshold = 10.0;
+  // dist_threshold = 10.0;
+  double dist_threshold = sqrt((cw*cw) + (cl*cl)) / 2.0;
 
   bool reverse = false;
   if (plan.s.size() > 1) {
@@ -169,7 +190,9 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
     }
   }
 
-  vector<char> &c = (*minimap);
+  // Create 1 letter alias to make the map at the bottom more readable.
+  vector<char> &c = (*wp_minimap);
+  vector<char> &e = (*ego_minimap);
 
   // vector<char> c = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
   // Can do something smart here, but better make it easy to read.
@@ -183,13 +206,16 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
     // cout << endl << "---------" << endl;
     // cout << "ref sd: " << ref[0] << ", " << ref[1] << ", target sd = " <<
     //   car[0] << ", " << car[1] << endl << endl;
-    // Waypoint model
+
+    // --- Waypoint model ---
     double dist = car[0] - s_fin;
+    bool debug_msg = true;
     if (FindCarInCell(car,(-3*cw/2), (-cw/2), (cl/2),(3*cl/2),ref, reverse, "top left") == true) {
       c[0] = '*';
       switch (state) {
         case ego::STATE_LCL: {
-          cost = 0.6 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c0_lcl" << endl;
+          cost = 0.6 * abs(dist_threshold - dist) * weight;
           break;
         }
         default: {
@@ -201,10 +227,12 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       c[1] = '*';
       switch (state) {
         case ego::STATE_FC: {
-          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c1_fc" << endl;
+          cost = 0.8 * abs(dist_threshold - dist) * weight;
           break;
         }
         case ego::STATE_KL: {
+          if (debug_msg) cout << "c1_kl" << endl;
           cost = max((dist_threshold - dist) * weight, cost);
           break;
         }
@@ -217,7 +245,8 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       c[2] = '*';
       switch (state) {
         case ego::STATE_LCR: {
-          cost = 0.6 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c2_lcr" << endl;
+          cost = 0.6 * abs(dist_threshold - dist) * weight;
           break;
         }
         default: {
@@ -229,7 +258,8 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       c[3] = '*';
       switch (state) {
         case ego::STATE_LCL: {
-          cost = 1.0 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c3_lcl" << endl;
+          cost = 1.0 * abs(dist_threshold - dist) * weight;
           break;
         }
         default: {
@@ -244,11 +274,13 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       // center lane is occupied.
       switch (state) {
         case ego::STATE_FC: {
-          cost = 0.3 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c4_fc" << endl;
+          cost = 0.3 * abs(dist_threshold - dist) * weight;
           break;          
         }
         case ego::STATE_KL: {
-          cost = 1.5 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c4_kl" << endl;
+          cost = 1.5 * abs(dist_threshold - dist) * weight;
           break;
         }
         default: {
@@ -260,7 +292,8 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       c[5] = '*';
       switch (state) {
         case ego::STATE_LCR: {
-          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c5_lcr" << endl;
+          cost = 0.8 * abs(dist_threshold - dist) * weight;
           break;
         }
         default: {
@@ -272,7 +305,8 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       c[6] = '*';
       switch (state) {
         case ego::STATE_LCL: {
-          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c6_lcl" << endl;
+          cost = 0.8 * abs(dist_threshold - dist) * weight;
           break;
         }
         default: {
@@ -282,12 +316,30 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
     }
     if (FindCarInCell(car,(-cw/2), (cw/2), (-3*cl/2),(-cl/2),ref, reverse, "bottom center") == true) {
       c[7] = '*';
-    }
-    if (FindCarInCell(car,(cw/2), (3*cw/2), (-3*cl/2),(-cl/2),ref, reverse, "bottom right") == true) {
-      c[8] = '*';
       switch (state) {
+        // When another car is directly ahead, FC is the state that we want the car to pick.
+        case ego::STATE_FC: {
+          if (debug_msg) cout << "c7_fc" << endl;
+          cost = 0.0;
+          break;
+        }
+        case ego::STATE_KL: {
+          if (debug_msg) cout << "c7_kl" << endl;
+          cost = max((dist_threshold - dist) * weight, cost);
+          break;
+        }
         case ego::STATE_LCR: {
-          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          if (debug_msg) cout << "c7_lcr" << endl;
+          // IF another car is already between waypoint and ego car, the only right action is to follow
+          // that car. This condition may happen after a lane change.
+          cost = 0.3 * max((dist_threshold - dist) * weight, cost);
+          break;
+        }
+        case ego::STATE_LCL: {
+          if (debug_msg) cout << "c7_lcl" << endl;
+          // IF another car is already between waypoint and ego car, the only right action is to follow
+          // that car. This condition may happen after a lane change.
+          cost = 0.3 * max((dist_threshold - dist) * weight, cost);
           break;
         }
         default: {
@@ -295,6 +347,152 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
         }
       }
     }
+    if (FindCarInCell(car,(cw/2), (3*cw/2), (-3*cl/2),(-cl/2),ref, reverse, "bottom right") == true) {
+      c[8] = '*';
+      switch (state) {
+        case ego::STATE_LCR: {
+          if (debug_msg) cout << "c8_lcr" << endl;
+          cost = 0.8 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    // --- END - Waypoint model ---
+
+    // --- Car model ---
+    dist = distance(car[0], car[1], ego_ref[0], ego_ref[1]);
+    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (cl/2),(3*cl/2),ego_ref, reverse, "top left") == true) {
+      e[0] = '*';
+      switch (state) {
+        case ego::STATE_LCL: {
+          if (debug_msg) cout << "e0_lcl" << endl;
+          cost = 0.8 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car,  (-cw/2),   (cw/2), (cl/2),(3*cl/2),ego_ref, reverse, "top center") == true) {
+      e[1] = '*';
+      switch (state) {
+        // When another car is directly ahead, FC is the state that we want the car to pick.
+        case ego::STATE_FC: {
+          if (debug_msg) cout << "e1_fc" << endl;
+          cost = 0.0;
+          break;
+        }
+        case ego::STATE_KL: {
+          if (debug_msg) cout << "e1_kl" << endl;
+          cost = max((dist_threshold - dist) * weight, cost);
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car, (cw/2), (3*cw/2), (cl/2),(3*cl/2),ego_ref, reverse, "top right") == true) {
+      e[2] = '*';
+      switch (state) {
+        case ego::STATE_LCR: {
+          if (debug_msg) cout << "e2_lcr" << endl;
+          cost = 0.8 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-cl/2),(cl/2),ego_ref, reverse, "mid left") == true) {
+      e[3] = '*';
+      switch (state) {
+        case ego::STATE_LCL: {
+          if (debug_msg) cout << "e3_lcl" << endl;
+          cost = 1.2 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car,(-cw/2), (cw/2), (-cl/2),(cl/2),ego_ref, reverse, "mid center") == true) {
+      e[4] = '*';
+
+      switch (state) {
+        case ego::STATE_FC: {
+          if (debug_msg) cout << "e4_fc" << endl;
+          cost = 0;
+          break;          
+        }
+        case ego::STATE_KL: {
+          if (debug_msg) cout << "e4_kl" << endl;
+          cost = 1.5 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car,(cw/2), (3*cw/2), (-cl/2),(cl/2),ego_ref, reverse, "mid right") == true) {
+      e[5] = '*';
+      switch (state) {
+        case ego::STATE_LCR: {
+          if (debug_msg) cout << "e5_lcr" << endl;
+          cost = 0.4 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+
+        }
+      }
+    }
+    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-3*cl/2),(-cl/2),ego_ref, reverse, "bottom left") == true) {
+      e[6] = '*';
+      switch (state) {
+        case ego::STATE_LCL: {
+          if (debug_msg) cout << "e6_lcl" << endl;
+          cost = 0.4 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car,(-cw/2), (cw/2), (-3*cl/2),(-cl/2),ego_ref, reverse, "bottom center") == true) {
+      e[7] = '*';
+      if (debug_msg) cout << "e7" << endl;
+      // If car is running at / faster than ego, slide left or right.
+      if (cars[k].position.v > snap.position.v &&
+          d2lane(car[1]) == d2lane(snap.position.d)) {
+        if (state == ego::STATE_FC || state != ego::STATE_KL) {
+          cost += 0.2 * abs(dist_threshold - dist) * weight;
+        }
+      }
+    }
+    if (FindCarInCell(car,(cw/2), (3*cw/2), (-3*cl/2),(-cl/2),ego_ref, reverse, "bottom right") == true) {
+      e[8] = '*';
+      switch (state) {
+        case ego::STATE_LCR: {
+          if (debug_msg) cout << "e8_lcr" << endl;
+          cost = 0.4 * abs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    assert(isnan(cost) == false);
+    // --- END Car model ---
 
     // Plan model
     // double dist = car[0] - s_fin;
@@ -354,14 +552,14 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
   }
 
   // if (c[1] == '*' || c[4] == '*' || c[7] == '*') {
-    // cout <<
-    // "-------------" << endl <<
-    // "| "<< c[0] <<" | "<< c[1] <<" | "<< c[2] <<" |" << endl <<
-    // "-------------" << endl <<
-    // "| "<< c[3] <<" | "<< c[4] <<" | "<< c[5] <<" |" << endl <<
-    // "-------------" << endl <<
-    // "| "<< c[6] <<" | "<< c[7] <<" | "<< c[8] <<" |" << endl <<
-    // "-------------" << endl;
+    cout << "Waypoint center:      Ego Center:" << endl <<
+    "-------------   -------------" << endl <<
+    "| "<< c[0] <<" | "<< c[1] <<" | "<< c[2] <<" |   " << "| "<< e[0] <<" | "<< e[1] <<" | "<< e[2] <<" |" << endl <<
+    "-------------   -------------" << endl <<
+    "| "<< c[3] <<" | "<< c[4] <<" | "<< c[5] <<" |   " << "| "<< e[3] <<" | "<< e[4] <<" | "<< e[5] <<" |" << endl <<
+    "-------------   -------------" << endl <<
+    "| "<< c[6] <<" | "<< c[7] <<" | "<< c[8] <<" |   " << "| "<< e[6] <<" | "<< e[7] <<" | "<< e[8] <<" |" << endl <<
+    "-------------   -------------" << endl;
   // }
 
   // === END COLLISION GRID ===
@@ -511,11 +709,12 @@ double CalculateCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
                      const ego::Trajectory &plan,
                      const ego::Trajectory &waypoints,
                      const ego::CostWeights &weights,
-                     vector<char> *minimap,
+                     vector<char> *wp_minimap,
+                     vector<char> *ego_minimap,
                      bool verbose=false) {
   double total_cost = 0.0;
   double collision_cost = CollisionCost(cf_state, plan, waypoints,
-    weights.collision, minimap);
+    weights.collision, wp_minimap, ego_minimap);
   double efficiency_cost = EfficiencyCost(cf_state, plan, waypoints, weights.efficiency);
   double change_state_cost = ChangeStateCost(cf_state, plan, waypoints, weights.change_state);
   // total_cost = collision_cost + efficiency_cost + change_state_cost;

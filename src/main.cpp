@@ -147,9 +147,9 @@ int main(int argc, char *argv[]) {
           // ---INIT EGO---
           EgoCar ego;
           EgoConfig ego_config;
-          ego_config.default_target_speed = mph2mps(40.0);
+          ego_config.default_target_speed = mph2mps(49.5);
           ego_config.default_max_acceleration = 9.0;
-          ego_config.target_speed = mph2mps(40.5); // mps
+          ego_config.target_speed = mph2mps(49.5); // mps
           ego_config.dt = dt;
           ego_config.car_length = car_length;
           ego_config.max_jerk = 9.0; // m/s^3
