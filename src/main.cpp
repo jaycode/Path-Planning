@@ -77,9 +77,12 @@ int main(int argc, char *argv[]) {
   world.map_waypoints_dx = &map_waypoints_dx;
   world.map_waypoints_dy = &map_waypoints_dy;
 
+  // State of the last Ego Car object.
+  State previous_state = STATE_KL;
+
   // init(*world.map_waypoints_s, *world.map_waypoints_x, *world.map_waypoints_y);
 
-  h.onMessage([&world](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&world, &previous_state](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // Initial experiment - see if frenet conversion works:
     // TestFrenetConversion1(world);
@@ -134,6 +137,8 @@ int main(int argc, char *argv[]) {
           // Length between front and rear wheels in meter.
           double car_length = 1.0;
 
+          // ---INIT EGO---
+          EgoCar ego;
           EgoConfig ego_config;
           ego_config.default_target_speed = mph2mps(49.5);
           ego_config.default_max_acceleration = 9.0;
@@ -169,13 +174,8 @@ int main(int argc, char *argv[]) {
 
           // target_x points to horizon when there is nothing ahead,
           // but otherwise set this to a car in front of ego car.
-          ego_config.target_x = ego_config.horizon;
+          ego_config.target_x = ego_config.horizon;           
 
-          // ===START===
-
-          // AssertMapCorrectness(world.map_waypoints_s);
-
-          // ---INIT EGO---
           Position pos;
           pos.x = car_x;
           pos.y = car_y;
@@ -211,7 +211,8 @@ int main(int argc, char *argv[]) {
 
           pos.yaw = deg2rad(car_yaw);
 
-          EgoCar ego = EgoCar(world, pos, ego_config);
+          ego = EgoCar(world, pos, ego_config);
+          ego.state = previous_state;
           // ---END---
 
           // ---INIT OTHER VEHICLES---
@@ -247,6 +248,7 @@ int main(int argc, char *argv[]) {
           weights.change_state = 0.5;
 
           Trajectory best_trajectory = ego.PlanTrajectory(other_cars, weights);
+          previous_state = ego.state;
 
           // cout << "\rhellow" << flush;
           // cout << "\rcar1 x: " << other_cars[0].position.x << flush;
@@ -272,7 +274,6 @@ int main(int argc, char *argv[]) {
           // cout << endl;
 
           // ===END===
-
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 

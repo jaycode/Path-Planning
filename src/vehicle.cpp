@@ -744,5 +744,3 @@ void EgoCar::RealizeLaneChange(const vector<OtherCar> &other_cars,
     pos_anchors.push_back(make_tuple(4, (*snap).position.d + (2.5/4)*(*snap).position.d ));
   }
   (*snap).config.active_spline_anchors = pos_anchors;
-
-}
