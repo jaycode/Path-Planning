@@ -68,12 +68,17 @@ double EfficiencyCost(const std::tuple<ego::State, ego::Snapshot, std::vector<eg
 
 bool FindCarInCell(const vector<double> &target, double w1, double w2,
                    double h1, double h2, const vector<double> &ref,
-                   bool reverse) {
+                   bool reverse, string label) {
+
+  // cout << endl << label << ": checks between " << (w1 + ref[1]) << " to " << (w2 + ref[1]) <<
+  //   " in d, and " << (h1 + ref[0]) << " to " << (h2 + ref[0]) << " in s " <<
+  //   endl;
 
   if ((target[1] > (w1 + ref[1])) &&
       (target[1] < (w2 + ref[1])) &&
       (target[0] > (h1 + ref[0])) &&
       (target[0] < (h2 + ref[0]))) {
+    // cout << "**FOUND**" << endl;
     return true;
   }
   else {
@@ -145,72 +150,188 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
     // car[0] += (snap.config.num_p-1)*dt*cars[k].position.v;
 
     // Defaults to up = positive numbers
-
+    // cout << endl << "---------" << endl;
+    // cout << "ref sd: " << ref[0] << ", " << ref[1] << ", target sd = " <<
+    //   car[0] << ", " << car[1] << endl << endl;
+    // Waypoint model
     double dist = car[0] - s_fin;
-    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (cl/2),(3*cl/2),ref, reverse) == true) {
+    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (cl/2),(3*cl/2),ref, reverse, "top left") == true) {
       c[0] = '*';
+      switch (state) {
+        case ego::STATE_LCL: {
+          cost = 0.6 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
     }
-    if (FindCarInCell(car,  (-cw/2),   (cw/2), (cl/2),(3*cl/2),ref, reverse) == true) {
+    if (FindCarInCell(car,  (-cw/2),   (cw/2), (cl/2),(3*cl/2),ref, reverse, "top center") == true) {
       c[1] = '*';
-      if (state == ego::STATE_FC) {
-        cost = 0.8 * fabs(dist_threshold - dist) * weight;
-      }
-      else {
-        cost = max((dist_threshold - dist) * weight, cost);
+      switch (state) {
+        case ego::STATE_FC: {
+          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        case ego::STATE_KL: {
+          cost = max((dist_threshold - dist) * weight, cost);
+          break;
+        }
+        default: {
+          
+        }
       }
     }
-    if (FindCarInCell(car, (cw/2), (3*cw/2), (cl/2),(3*cl/2),ref, reverse) == true) {
+    if (FindCarInCell(car, (cw/2), (3*cw/2), (cl/2),(3*cl/2),ref, reverse, "top right") == true) {
       c[2] = '*';
-    }
-    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-cl/2),(cl/2),ref, reverse) == true) {
-      c[3] = '*';
-      if (state == ego::STATE_LCL) {
-        cost = max(0.8 * (dist_threshold - dist) * weight, cost);
+      switch (state) {
+        case ego::STATE_LCR: {
+          cost = 0.6 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
       }
     }
-    if (FindCarInCell(car,(-cw/2), (cw/2), (-cl/2),(cl/2),ref, reverse) == true) {
+    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-cl/2),(cl/2),ref, reverse, "mid left") == true) {
+      c[3] = '*';
+      switch (state) {
+        case ego::STATE_LCL: {
+          cost = 1.0 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+    if (FindCarInCell(car,(-cw/2), (cw/2), (-cl/2),(cl/2),ref, reverse, "mid center") == true) {
       c[4] = '*';
 
-      // We do not use max here since we do not want to have 0 cost when
+      // We use fabs and not max here since we do not want to have 0 cost when
       // center lane is occupied.
-      if (state == ego::STATE_FC) {
-        cost = 0.2 * fabs(dist_threshold - dist) * weight;
-      }
-      else {
-        cost = 1.5 * fabs(dist_threshold - dist) * weight;
+      switch (state) {
+        case ego::STATE_FC: {
+          cost = 0.3 * fabs(dist_threshold - dist) * weight;
+          break;          
+        }
+        case ego::STATE_KL: {
+          cost = 1.5 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
       }
     }
-    if (FindCarInCell(car,(cw/2), (3*cw/2), (-cl/2),(cl/2),ref, reverse) == true) {
+    if (FindCarInCell(car,(cw/2), (3*cw/2), (-cl/2),(cl/2),ref, reverse, "mid right") == true) {
       c[5] = '*';
-      if (state == ego::STATE_LCR) {
-        cost = max(0.8 * (dist_threshold - dist) * weight, cost);
+      switch (state) {
+        case ego::STATE_LCR: {
+          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+
+        }
       }
     }
-    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-3*cl/2),(-cl/2),ref, reverse) == true) {
+    if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-3*cl/2),(-cl/2),ref, reverse, "bottom left") == true) {
       c[6] = '*';
-    }
-    if (FindCarInCell(car,(-cw/2), (cw/2), (-3*cl/2),(-cl/2),ref, reverse) == true) {
-      c[7] = '*';
-      // If after turning left or right the car gets behind us, there is a risk
-      // of hitting it while turning.
-      if (state == ego::STATE_LCL || state == ego::STATE_LCR) {
-        cost = max(0.1 * (dist_threshold - dist) * weight, cost);
+      switch (state) {
+        case ego::STATE_LCL: {
+          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
       }
     }
-    if (FindCarInCell(car,(cw/2), (3*cw/2), (-3*cl/2),(-cl/2),ref, reverse) == true) {
-      c[8] = '*';
+    if (FindCarInCell(car,(-cw/2), (cw/2), (-3*cl/2),(-cl/2),ref, reverse, "bottom center") == true) {
+      c[7] = '*';
     }
+    if (FindCarInCell(car,(cw/2), (3*cw/2), (-3*cl/2),(-cl/2),ref, reverse, "bottom right") == true) {
+      c[8] = '*';
+      switch (state) {
+        case ego::STATE_LCR: {
+          cost = 0.8 * fabs(dist_threshold - dist) * weight;
+          break;
+        }
+        default: {
+          
+        }
+      }
+    }
+
+    // Plan model
+    // double dist = car[0] - s_fin;
+    // if (FindCarInCell(car,(-3*cw/2), (-cw/2), (cl/2),(3*cl/2),ref, reverse) == true) {
+    //   c[0] = '*';
+    // }
+    // if (FindCarInCell(car,  (-cw/2),   (cw/2), (cl/2),(3*cl/2),ref, reverse) == true) {
+    //   c[1] = '*';
+    //   if (state == ego::STATE_FC) {
+    //     cost = 0.8 * fabs(dist_threshold - dist) * weight;
+    //   }
+    //   else {
+    //     cost = max((dist_threshold - dist) * weight, cost);
+    //   }
+    // }
+    // if (FindCarInCell(car, (cw/2), (3*cw/2), (cl/2),(3*cl/2),ref, reverse) == true) {
+    //   c[2] = '*';
+    // }
+    // if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-cl/2),(cl/2),ref, reverse) == true) {
+    //   c[3] = '*';
+    //   if (state == ego::STATE_LCL) {
+    //     cost = max(0.8 * (dist_threshold - dist) * weight, cost);
+    //   }
+    // }
+    // if (FindCarInCell(car,(-cw/2), (cw/2), (-cl/2),(cl/2),ref, reverse) == true) {
+    //   c[4] = '*';
+
+    //   // We do not use max here since we do not want to have 0 cost when
+    //   // center lane is occupied.
+    //   if (state == ego::STATE_FC) {
+    //     cost = 0.2 * fabs(dist_threshold - dist) * weight;
+    //   }
+    //   else {
+    //     cost = 1.5 * fabs(dist_threshold - dist) * weight;
+    //   }
+    // }
+    // if (FindCarInCell(car,(cw/2), (3*cw/2), (-cl/2),(cl/2),ref, reverse) == true) {
+    //   c[5] = '*';
+    //   if (state == ego::STATE_LCR) {
+    //     cost = max(0.8 * (dist_threshold - dist) * weight, cost);
+    //   }
+    // }
+    // if (FindCarInCell(car,(-3*cw/2), (-cw/2), (-3*cl/2),(-cl/2),ref, reverse) == true) {
+    //   c[6] = '*';
+    // }
+    // if (FindCarInCell(car,(-cw/2), (cw/2), (-3*cl/2),(-cl/2),ref, reverse) == true) {
+    //   c[7] = '*';
+    //   // If after turning left or right the car gets behind us, there is a risk
+    //   // of hitting it while turning.
+    //   if (state == ego::STATE_LCL || state == ego::STATE_LCR) {
+    //     cost = max(0.1 * (dist_threshold - dist) * weight, cost);
+    //   }
+    // }
+    // if (FindCarInCell(car,(cw/2), (3*cw/2), (-3*cl/2),(-cl/2),ref, reverse) == true) {
+    //   c[8] = '*';
+    // }
   }
 
   // if (c[1] == '*' || c[4] == '*' || c[7] == '*') {
-    cout <<
-    "-------------" << endl <<
-    "| "<< c[0] <<" | "<< c[1] <<" | "<< c[2] <<" |" << endl <<
-    "-------------" << endl <<
-    "| "<< c[3] <<" | "<< c[4] <<" | "<< c[5] <<" |" << endl <<
-    "-------------" << endl <<
-    "| "<< c[6] <<" | "<< c[7] <<" | "<< c[8] <<" |" << endl <<
-    "-------------" << endl;
+    // cout <<
+    // "-------------" << endl <<
+    // "| "<< c[0] <<" | "<< c[1] <<" | "<< c[2] <<" |" << endl <<
+    // "-------------" << endl <<
+    // "| "<< c[3] <<" | "<< c[4] <<" | "<< c[5] <<" |" << endl <<
+    // "-------------" << endl <<
+    // "| "<< c[6] <<" | "<< c[7] <<" | "<< c[8] <<" |" << endl <<
+    // "-------------" << endl;
   // }
   // ---END - VIZ---
 
@@ -344,10 +465,11 @@ double CalculateCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
 
   // total_cost = collision_cost + efficiency_cost + jerk_and_accel_cost + change_state_cost;
 
-  cout << "collision_cost: " << collision_cost << endl;
-  cout << "efficiency_cost: " << efficiency_cost << endl;
-  cout << "change_state_cost: " << change_state_cost << endl;
-  cout << "total cost: " << total_cost << endl;
+  // cout << "collision_cost: " << collision_cost << endl;
+  // cout << "efficiency_cost: " << efficiency_cost << endl;
+  // cout << "change_state_cost: " << change_state_cost << endl;
+  // cout << "total cost: " << total_cost << endl;
+
   // cout << "jerk_and_accel_cost: " << jerk_and_accel_cost << endl;
 
 

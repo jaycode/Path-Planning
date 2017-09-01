@@ -29,10 +29,12 @@ typedef struct Trajectory {
 enum State {
   // Keep Lane
   STATE_KL = 0,
+  // Lane Change Right, put before left since apparently it is easier to do.
+  // I tested this by setting the car to move only left and only right, and
+  // right trajectory was smoother.
+  STATE_LCR,
   // Lane Change Left
   STATE_LCL,
-  // Lane Change Right
-  STATE_LCR,
   // Follow a Car
   STATE_FC,
   // Used for enum loop, do not remove, and keep it as the last element.
@@ -122,12 +124,7 @@ typedef struct EgoConfig : Config {
   // When following a car, what's the distance to keep?
   double follow_distance = 8;
 
-  std::map<ego::State, double> state_durations = {
-    {ego::STATE_KL, 0.0},
-    {ego::STATE_LCL, 0.0},
-    {ego::STATE_LCR, 0.0},
-    {ego::STATE_FC, 0.0}
-  };
+  std::map<ego::State, double> *state_durations_ptr;
 
 } EgoConfig;
 

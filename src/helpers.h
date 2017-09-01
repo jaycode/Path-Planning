@@ -32,7 +32,10 @@ double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
 // Mile per hour to meter per second.
-double mph2mps(double x) { return x * 1609.34 / 3600.0; }
+double mph2mps(double x) { return x * 0.447; }
+
+// Reversed.
+double mps2mph(double x) { return x / 0.447; }
 
 // Gets d (in meters from center of road) of a lane.
 double lane2d(int lane) { return 2.0+4.0*lane; }

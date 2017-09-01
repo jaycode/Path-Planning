@@ -80,9 +80,16 @@ int main(int argc, char *argv[]) {
   // State of the last Ego Car object.
   State previous_state = STATE_KL;
 
+  std::map<ego::State, double> state_durations = {
+    {ego::STATE_KL, 0.0},
+    {ego::STATE_LCL, 0.0},
+    {ego::STATE_LCR, 0.0},
+    {ego::STATE_FC, 0.0}
+  };
+
   // init(*world.map_waypoints_s, *world.map_waypoints_x, *world.map_waypoints_y);
 
-  h.onMessage([&world, &previous_state](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&world, &previous_state, &state_durations](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // Initial experiment - see if frenet conversion works:
     // TestFrenetConversion1(world);
@@ -140,7 +147,7 @@ int main(int argc, char *argv[]) {
           // ---INIT EGO---
           EgoCar ego;
           EgoConfig ego_config;
-          ego_config.default_target_speed = mph2mps(49.5);
+          ego_config.default_target_speed = mph2mps(49.0);
           ego_config.default_max_acceleration = 9.0;
           ego_config.target_speed = mph2mps(45.5); // mps
           ego_config.dt = dt;
@@ -174,7 +181,9 @@ int main(int argc, char *argv[]) {
 
           // target_x points to horizon when there is nothing ahead,
           // but otherwise set this to a car in front of ego car.
-          ego_config.target_x = ego_config.horizon;           
+          ego_config.target_x = ego_config.horizon;
+
+          ego_config.state_durations_ptr = &state_durations;
 
           Position pos;
           pos.x = car_x;
