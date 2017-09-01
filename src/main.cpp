@@ -147,9 +147,9 @@ int main(int argc, char *argv[]) {
           // ---INIT EGO---
           EgoCar ego;
           EgoConfig ego_config;
-          ego_config.default_target_speed = mph2mps(49.0);
+          ego_config.default_target_speed = mph2mps(40.0);
           ego_config.default_max_acceleration = 9.0;
-          ego_config.target_speed = mph2mps(45.5); // mps
+          ego_config.target_speed = mph2mps(40.5); // mps
           ego_config.dt = dt;
           ego_config.car_length = car_length;
           ego_config.max_jerk = 9.0; // m/s^3
@@ -168,7 +168,7 @@ int main(int argc, char *argv[]) {
           // predict the environment after lane change,
           // but if it is too high, the prediction becomes
           // less relevant to the car.
-          ego_config.num_pp = 25;
+          ego_config.num_pp = 60;
 
           // ego_config.num_last_path = 50;
 
@@ -252,8 +252,12 @@ int main(int argc, char *argv[]) {
           CostWeights weights;
           weights.collision = 1.0;
           weights.efficiency = 0.1;
-          weights.max_accel = 0.8;
-          weights.max_jerk = 0.5;
+
+          // TODO: I'm not sure if jerk and accel calculation here
+          //       was correct, but it was helpful in deciding paths with similar
+          //       other scores.
+          weights.max_accel = 0.001;
+          weights.max_jerk = 0.001;
           weights.change_state = 0.5;
 
           Trajectory best_trajectory = ego.PlanTrajectory(other_cars, weights);

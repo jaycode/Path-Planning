@@ -51,18 +51,18 @@ double EfficiencyCost(const std::tuple<ego::State, ego::Snapshot, std::vector<eg
   double max_a = snap.config.default_max_acceleration;
   double max_j = snap.config.max_jerk;
   double t = dt * waypoints.s.size();
-  // cout << "max_s = " << (t*max_v) << " + " << (0.5*max_a*t*t) << " + " <<
-  //   ((1/6)*max_j*t*t*t) << endl;
-  // // x = x0 + v0*t + (1/2)*a0*t^2 + (1/6)*j*t^3
+  cout << "max_s = " << (t*max_v) << " + " << (0.5*max_a*t*t) << " + " <<
+    ((1/6)*max_j*t*t*t) << endl;
+  // x = x0 + v0*t + (1/2)*a0*t^2 + (1/6)*j*t^3
   double max_s = max_v*t + (0.5*max_a*t*t) + ((1/6)*max_j*t*t*t);
-  // cout << "max_s = " << max_s << endl;
-  // cout << "waypoints distance = " << waypoints.distance
-  //      << " over " << t << " seconds" << endl;
+  cout << "max_s = " << max_s << endl;
+  cout << "waypoints distance = " << waypoints.distance
+       << " over " << t << " seconds" << endl;
   double cost = 0;
   if (waypoints.distance > 0) {
-    double cost = fabs(max_s-waypoints.distance)/waypoints.distance * weight;
+    cost = fabs(max_s-waypoints.distance)/waypoints.distance * weight;
   }
-  // cout << "cost: " << cost << endl;
+  cout << "cost: " << cost << endl;
   return cost;
 }
 
@@ -98,7 +98,6 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
                      vector<char> *minimap) {
 
   double cost = 0.0;
-  double dist_threshold = 10.0;
   ego::Snapshot snap = get<1>(cf_state);
   vector<ego::OtherCar> cars = get<2>(cf_state);
   ego::State state = get<0>(cf_state);
@@ -114,7 +113,38 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
   // The id of first plan plan point.
   // int plan_start_id = plan.s.size() - snap.config.num_pp;
 
-  // ---VIZ---
+  // vector<double> ref = {snap.position.s, snap.position.d};  
+  vector<double> ref = {s_fin, d_fin};  
+
+
+  // === DIRECT COLLISION CHECK ===
+  // See if another car is going to be in the imagined path.
+  // TODO: Use actual path. For now just simply check if ther is a car near one of the
+  //       waypoint positions.
+
+  double dist_threshold = 2.0;
+
+  for (int k = 0; k < cars.size(); ++k) {
+    vector<double> car = {cars[k].position.s, cars[k].position.d};
+    for (int i = 0; i < waypoints.s.size(); ++i) {
+      if (fabs(waypoints.s[i] - cars[k].position.s) < dist_threshold &&
+          fabs(waypoints.d[i] - cars[k].position.d) < dist_threshold 
+          && (cars[k].position.v < snap.position.v)
+          ) {
+        cout << "I detect a collision at s = " << waypoints.s[i] <<
+          " d = " << waypoints.d[i] << endl;
+        if (state != ego::STATE_FC) {
+          cost = 0.2 * weight;
+        }
+        // exit(0);
+        return cost;
+      }
+    }
+  }
+
+  // === END - DIRECT COLLISION CHECK ===
+
+  // === COLLISION GRID ===
   // Visualize other cars' positions with grid cells.
   // The reference point is located at the center.
   // 
@@ -130,6 +160,7 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
   int rows = 3;
   double cw = 4.0; // cell width
   double cl = 10.0; // cell length
+  dist_threshold = 10.0;
 
   bool reverse = false;
   if (plan.s.size() > 1) {
@@ -137,10 +168,9 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       reverse = true;
     }
   }
-  // vector<double> ref = {snap.position.s, snap.position.d};  
-  vector<double> ref = {s_fin, d_fin};  
 
   vector<char> &c = (*minimap);
+
   // vector<char> c = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
   // Can do something smart here, but better make it easy to read.
   for (int k = 0; k < cars.size(); ++k) {
@@ -333,7 +363,8 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
     // "| "<< c[6] <<" | "<< c[7] <<" | "<< c[8] <<" |" << endl <<
     // "-------------" << endl;
   // }
-  // ---END - VIZ---
+
+  // === END COLLISION GRID ===
 
   return cost;
 }
@@ -397,10 +428,17 @@ double JerkAndAccelCost(const std::tuple<ego::State, ego::Snapshot, std::vector<
     vector<double> y = {0.0, 0.0, 0.0, 0.0};
     vector<double> v = {0.0, 0.0, 0.0};
     vector<double> a = {0.0, 0.0};
+    vector<double> yaw = {0.0, 0.0, 0.0};
+    vector<double> yaw_rate = {0.0, 0.0};
+
     double j = 0.0;
     double max_j = 0.0;
     double max_a = 0.0;
+    double max_j_yr = 0.0;
+    double max_j_a = 0.0;
     for (int i = 3; i < plan.x.size(); ++i) {
+      // Ids with higher index are more recent.
+
       x[0] = plan.x[i-3];
       x[1] = plan.x[i-2];
       x[2] = plan.x[i-1];
@@ -415,25 +453,50 @@ double JerkAndAccelCost(const std::tuple<ego::State, ego::Snapshot, std::vector<
       v[1] = distance(x[1], y[1], x[2], y[2]) / dt;
       v[2] = distance(x[2], y[2], x[3], y[3]) / dt;
 
-      a[0] = (v[1] - v[0]) / dt;
-      a[1] = (v[2] - v[1]) / dt;
+      a[0] = (v[1] - v[0]) / (dt*2);
+      a[1] = (v[2] - v[1]) / (dt*2);
 
-      j = a[1] - a[0];
+      j = ((a[1] - a[0]) / (dt*3)) + ((yaw_rate[0] - yaw_rate[1]) / (dt*2));
+
+      // if (a[0] > 10.0) {
+      //   cout << "Impossible!" << endl;
+      //   cout << a[0] << 
+      //   " vdist " << (v[1] - v[0]) << 
+      //   " v1 " << v[1] << " v2 " << v[0] <<
+      //   " dist1 " << distance(x[0], y[0], x[1], y[1]) <<
+      //   " dist2 " << distance(x[1], y[1], x[2], y[2]) <<
+      //   " dt: " << dt << endl;
+      // }
+
+      yaw[0] = atan2(y[1] - y[0], x[1] - x[0]);
+      yaw[1] = atan2(y[2] - y[1], x[2] - x[1]);
+      yaw[2] = atan2(y[3] - y[2], x[3] - x[2]);
+
+      yaw_rate[0] = (yaw[1] - yaw[0]) / dt;
+      yaw_rate[1] = (yaw[2] - yaw[1]) / dt;
+
       if (a[0] > max_a && a[0] > max_allowed_a) {
         max_a = a[0];
       }
       if (a[1] > max_a && a[1] > max_allowed_a) {
         max_a = a[1];
       }
+
       if (j > max_j && j > max_allowed_j) {
         max_j = j;
+        max_j_yr = yaw_rate[0] - yaw_rate[1];
+        max_j_a = a[1] - a[0];
       }
     }
+
+    cout << "Max Jerk's a: " << max_j_a << endl;
+    cout << "Max Jerk's yaw rate: " << max_j_yr << endl;
+
     double max_a_cost = weight_a * max(max_a-max_allowed_a, 0.0);
     double jerk_cost = weight_j * max(max_j-max_allowed_j, 0.0);
 
-    // cout << "Jerk cost: " << jerk_cost << endl;
-    // cout << "Max A cost: " << max_a_cost << endl;
+    cout << "Jerk cost: " << jerk_cost << endl;
+    cout << "Max A cost: " << max_a_cost << endl;
     cost = max_a_cost + jerk_cost;
   }
 
@@ -455,22 +518,22 @@ double CalculateCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
     weights.collision, minimap);
   double efficiency_cost = EfficiencyCost(cf_state, plan, waypoints, weights.efficiency);
   double change_state_cost = ChangeStateCost(cf_state, plan, waypoints, weights.change_state);
-  total_cost = collision_cost + efficiency_cost + change_state_cost;
+  // total_cost = collision_cost + efficiency_cost + change_state_cost;
 
   // Unused for now.
-  // double jerk_and_accel_cost = JerkAndAccelCost(
-  //   cf_state, plan, waypoints, weights.max_jerk, weights.max_accel,
-  //   get<1>(cf_state).config.max_jerk,
-  //   get<1>(cf_state).config.default_max_acceleration);
+  double jerk_and_accel_cost = JerkAndAccelCost(
+    cf_state, plan, waypoints, weights.max_jerk, weights.max_accel,
+    get<1>(cf_state).config.max_jerk,
+    get<1>(cf_state).config.default_max_acceleration);
 
-  // total_cost = collision_cost + efficiency_cost + jerk_and_accel_cost + change_state_cost;
+  total_cost = collision_cost + efficiency_cost + jerk_and_accel_cost + change_state_cost;
 
-  // cout << "collision_cost: " << collision_cost << endl;
-  // cout << "efficiency_cost: " << efficiency_cost << endl;
-  // cout << "change_state_cost: " << change_state_cost << endl;
-  // cout << "total cost: " << total_cost << endl;
+  cout << "collision_cost: " << collision_cost << endl;
+  cout << "efficiency_cost: " << efficiency_cost << endl;
+  cout << "change_state_cost: " << change_state_cost << endl;
+  cout << "total cost: " << total_cost << endl;
 
-  // cout << "jerk_and_accel_cost: " << jerk_and_accel_cost << endl;
+  cout << "jerk_and_accel_cost: " << jerk_and_accel_cost << endl;
 
 
   return total_cost;
