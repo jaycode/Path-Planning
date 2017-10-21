@@ -1,0 +1,1 @@
+g++ -std=c++11 test_JMT.cpp -o test_JMT && ./test_JMT
