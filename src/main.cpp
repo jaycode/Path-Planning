@@ -1,7 +1,3 @@
-/*
-  TODO: Change to use spline because xy coordinates does not work with JMT.
-*/
-
 #include <chrono>
 #include <fstream>
 #include <math.h>
@@ -338,14 +334,16 @@ tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
 
   for (int i=1; i <= T/dt; ++i) {
     double t = i * dt;
+    
     double s = s_coeffs[0]         + s_coeffs[1] * t       + s_coeffs[2] * t*t +
                s_coeffs[3] * t*t*t + s_coeffs[4] * t*t*t*t + s_coeffs[5] * t*t*t*t*t;
+    // double vt = s_coeffs[1]             + 2 * s_coeffs[2] * t       + 3 * s_coeffs[3] * t*t +
+    //             4 * s_coeffs[4] * t*t*t + 5 * s_coeffs[5] * t*t*t*t
+    //             + adj_vt;
 
-    double vt = s_coeffs[1]             + 2 * s_coeffs[2] * t       + 3 * s_coeffs[3] * t*t +
-                4 * s_coeffs[4] * t*t*t + 5 * s_coeffs[5] * t*t*t*t;
-
-    double at = 2 * s_coeffs[2] + 6 * s_coeffs[3] * t + 12 * s_coeffs[4] * t*t +
-                20 * s_coeffs[5] * t*t*t;
+    // double at = 2 * s_coeffs[2] + 6 * s_coeffs[3] * t + 12 * s_coeffs[4] * t*t +
+    //             20 * s_coeffs[5] * t*t*t
+    //             + adj_at;
 
     double d = d_coeffs[0]         + d_coeffs[1] * t       + d_coeffs[2] * t*t +
                d_coeffs[3] * t*t*t + d_coeffs[4] * t*t*t*t + d_coeffs[5] * t*t*t*t*t;
@@ -450,6 +448,55 @@ void SetupInitialState(const vector<double> &tj_s,
                      };
 }
 
+void TestFrenetDistance(const vector<double> maps_s,
+                        const vector<double> maps_x,
+                        const vector<double> maps_y) {
+  vector<double> sd0 = {100, 0};
+  vector<double> sd1 = {101, 0};
+  vector<double> xy0 = getXY(sd0[0], sd0[1], maps_s, maps_x, maps_y);
+  vector<double> xy1 = getXY(sd1[0], sd1[1], maps_s, maps_x, maps_y);
+  double dist_sd = distance(sd0[0], sd0[1], sd1[0], sd1[1]);
+  double dist_xy = distance(xy0[0], xy0[1], xy1[0], xy1[1]);
+  cout << "dist sd: " << dist_sd << " dist_xy: " << dist_xy << endl;
+}
+
+void FindBestTrajectory(const vector<double> &initial_state,
+                        double max_speed,
+                        
+                        vector<double> *new_tj_s,
+                        vector<double> *new_tj_d) {
+
+  double target_T = 4.5;
+  for (int target_lane = 0; target_lane <= 2; target_lane++) {
+    double target_s = initial_state[0] + 50;
+    double target_v = max_speed;
+
+    vector<double> target_state = {
+      target_s,
+      target_v,
+      0,
+      lane2d(target_lane),
+      0,
+      0
+    };
+
+    // cout << "initial state: " << initial_state << endl;
+    // cout << "target state: " << target_state << endl;
+
+    int N = target_T / dt;
+    first = false;
+
+    vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
+    tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt);
+
+    (*new_tj_s) = get<0>(traj);
+    (*new_tj_d) = get<1>(traj);
+  }
+}
+
+// Trajectory for s and d.
+vector<double> tj_s;
+vector<double> tj_d;
 // Time of created trajectory
 vector<double> tj_t;
 
@@ -471,6 +518,7 @@ int main() {
 
   // Waypoint map to read from
   string map_file_ = "../data/highway_map.csv";
+  // string map_file_ = "../data/highway_map_bosch1 - final.csv";
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
@@ -498,6 +546,8 @@ int main() {
 
   init(map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
+  TestFrenetDistance(map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -520,7 +570,8 @@ int main() {
             milliseconds new_ms = duration_cast<milliseconds>(
               system_clock::now().time_since_epoch()
             );
-            double dt = (double)(new_ms - ms).count() / 1000;
+            // double dt = (double)(new_ms - ms).count() / 1000;
+            double dt = 0.02;
             ms = new_ms;
             cout << dt << endl;
             double num_wp = 120;
@@ -557,7 +608,7 @@ int main() {
 
             double max_accel_t = mph2mps(9.5);
             double max_accel_n = mph2mps(9.5);
-            double max_speed = mph2mps(49.0);
+            double max_speed = mph2mps(45.0);
 
             vector<double> initial_state = {};
 
@@ -576,42 +627,15 @@ int main() {
 
             assert(initial_state.size() > 0);
 
-            int N;
             if (first == true) {
-
-              double target_T = 3.6;
-
               // Find best trajectory
 
-              double target_s = initial_state[0] + 40;
-              double target_v = max_speed;
-              double target_lane = 1;
-              // cout << "tgt s: " << target_s << endl; 
+              vector<double> new_tj_s;
+              vector<double> new_tj_d;
 
+              FindBestTrajectory(initial_state, max_speed, &new_tj_s, &new_tj_d)
 
-              vector<double> target_state = {
-                target_s,
-                max_speed,
-                0,
-                lane2d(target_lane),
-                0,
-                0
-              };
-
-              
-              // cout << "initial state: " << initial_state << endl;
-              // cout << "target state: " << target_state << endl;
-
-              N = target_T / dt;
-              first = false;
-
-              vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
-              tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt);
-
-              vector<double> &new_tj_s = get<0>(traj);
-              vector<double> &new_tj_d = get<1>(traj);
-
-              for (int i = 0; i < N; ++i) {
+              for (int i = 0; i < new_tj_s.size(); ++i) {
                 tj_s.push_back(new_tj_s[i]);
                 tj_d.push_back(new_tj_d[i]);
               }
@@ -623,7 +647,7 @@ int main() {
               double s0 = initial_state[0];
               double vn = initial_state[4];
               double d0 = initial_state[3];
-
+              
               for (int i = 1; i <= N; ++i) {
                 // cout << "ref_yaw: " << ref_yaw << endl;
                 double s1 = s0 + (vt * i * dt);
