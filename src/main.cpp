@@ -464,7 +464,8 @@ void FindBestTrajectory(const vector<double> &initial_state,
                         double max_speed,
                         
                         vector<double> *new_tj_s,
-                        vector<double> *new_tj_d) {
+                        vector<double> *new_tj_d,
+                        double dt = 0.02) {
 
   double target_T = 4.5;
   for (int target_lane = 0; target_lane <= 2; target_lane++) {
@@ -484,7 +485,6 @@ void FindBestTrajectory(const vector<double> &initial_state,
     // cout << "target state: " << target_state << endl;
 
     int N = target_T / dt;
-    first = false;
 
     vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
     tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt);
@@ -633,7 +633,8 @@ int main() {
               vector<double> new_tj_s;
               vector<double> new_tj_d;
 
-              FindBestTrajectory(initial_state, max_speed, &new_tj_s, &new_tj_d)
+              FindBestTrajectory(initial_state, max_speed, &new_tj_s, &new_tj_d);
+              first = false;
 
               for (int i = 0; i < new_tj_s.size(); ++i) {
                 tj_s.push_back(new_tj_s[i]);
@@ -642,7 +643,7 @@ int main() {
 
             }
             else {
-              N = num_wp - prev_size;
+              int N = num_wp - prev_size;
               double vt = max_speed;
               double s0 = initial_state[0];
               double vn = initial_state[4];
