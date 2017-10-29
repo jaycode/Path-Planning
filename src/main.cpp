@@ -420,9 +420,7 @@ double YawFromTJ(const vector<double> &tj_s,
   vector<double> xy2 = getXY(s2, d2, maps_s, maps_x, maps_y);
   double dy = xy1[1] - xy2[1];
   double dx = xy1[0] - xy2[0];
-  cout << "dy: " << dy << " dx: " << dx << endl;
   double yaw = atan2(dy, dx);
-  cout << "yaw from tj: " << yaw << endl;
   return yaw;
 }
 
@@ -469,8 +467,12 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
   double target_T = 4.5;
   for (int target_lane = 0; target_lane <= 2; target_lane++) {
-    double target_s = initial_state[0] + 50;
+    double target_s = initial_state[0] + 5.0;
     double target_v = max_speed;
+
+    if (initial_state[3] != target_lane) {
+      target_v -= 30/100 * target_v;
+    }
 
     vector<double> target_state = {
       target_s,
@@ -606,9 +608,9 @@ int main() {
           	vector<double> next_x_vals;
           	vector<double> next_y_vals;
 
-            double max_accel_t = mph2mps(9.5);
-            double max_accel_n = mph2mps(9.5);
-            double max_speed = mph2mps(45.0);
+            double max_accel_t = mph2mps(3.0);
+            double max_accel_n = mph2mps(3.0);
+            double max_speed = mph2mps(10.0);
 
             vector<double> initial_state = {};
 
@@ -641,8 +643,17 @@ int main() {
                 tj_d.push_back(new_tj_d[i]);
               }
 
+              for (int i = 0; i < 100; ++i) {
+                cout << tj_s[i] << ", " << tj_d[i];
+                if (i > 0) {
+                  double dist = distance(tj_s[i], tj_d[i], tj_s[i-1], tj_d[i-1]);
+                  cout << " dist: " << dist << endl;
+                }
+              }
+
             }
             else {
+              // Extrapolate previous trajectory
               int N = num_wp - prev_size;
               double vt = max_speed;
               double s0 = initial_state[0];
