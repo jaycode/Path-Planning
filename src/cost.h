@@ -148,7 +148,7 @@ double CollisionCost(const std::tuple<ego::State, ego::Snapshot, std::vector<ego
       c[7] = '*';
       cost = max(1.0 * (dist_threshold - dist) * weight, cost);
       if (state == ego::STATE_FC) {
-        cost: max(0.2 * (dist_threshold - dist) * weight, cost);
+        cost: max(0.1 * (dist_threshold - dist) * weight, cost);
       }
     }
     if (FindCarInCell(car,(cw/2), (3*cw/2), -t_length,(-cl/2),ref, reverse) == true) {
