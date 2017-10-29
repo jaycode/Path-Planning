@@ -460,40 +460,51 @@ void TestFrenetDistance(const vector<double> maps_s,
 
 void FindBestTrajectory(const vector<double> &initial_state,
                         double max_speed,
-                        
+                        const json &sensor_fusion,
+
                         vector<double> *new_tj_s,
                         vector<double> *new_tj_d,
                         double dt = 0.02) {
 
   double target_T = 4.5;
+  double min_cost = 99999999.9;
+  tuple<vector<double>, vector<double>> *best_traj;
+
   for (int target_lane = 0; target_lane <= 2; target_lane++) {
-    double target_s = initial_state[0] + 5.0;
-    double target_v = max_speed;
+    // Try out various lanes
+    for (double ds = 4.0; ds <= 30.0; ds+=2.0) {
+      // Try out various ds
+      double target_s = initial_state[0] + ds;
+      double target_v = max_speed;
 
-    if (initial_state[3] != target_lane) {
-      target_v -= 30/100 * target_v;
+      if (initial_state[3] != target_lane) {
+        target_v -= 30/100 * target_v;
+      }
+
+      vector<double> target_state = {
+        target_s,
+        target_v,
+        0,
+        lane2d(target_lane),
+        0,
+        0
+      };
+
+      // cout << "initial state: " << initial_state << endl;
+      // cout << "target state: " << target_state << endl;
+
+      int N = target_T / dt;
+
+      vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
+      tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt);
+      double cost = CalculateCost(traj, sensor_fusion);
+      if (cost < min_cost) {
+        best_traj = *traj;
+      }
     }
-
-    vector<double> target_state = {
-      target_s,
-      target_v,
-      0,
-      lane2d(target_lane),
-      0,
-      0
-    };
-
-    // cout << "initial state: " << initial_state << endl;
-    // cout << "target state: " << target_state << endl;
-
-    int N = target_T / dt;
-
-    vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
-    tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt);
-
-    (*new_tj_s) = get<0>(traj);
-    (*new_tj_d) = get<1>(traj);
   }
+  (*new_tj_s) = get<0>(&best_traj);
+  (*new_tj_d) = get<1>(&best_traj);
 }
 
 // Trajectory for s and d.
@@ -629,47 +640,28 @@ int main() {
 
             assert(initial_state.size() > 0);
 
-            if (first == true) {
-              // Find best trajectory
+            // Find best trajectory
 
-              vector<double> new_tj_s;
-              vector<double> new_tj_d;
+            vector<double> new_tj_s;
+            vector<double> new_tj_d;
 
-              FindBestTrajectory(initial_state, max_speed, &new_tj_s, &new_tj_d);
-              first = false;
+            FindBestTrajectory(initial_state, max_speed,
+                               sensor_fusion, &new_tj_s, &new_tj_d);
+            first = false;
 
-              for (int i = 0; i < new_tj_s.size(); ++i) {
-                tj_s.push_back(new_tj_s[i]);
-                tj_d.push_back(new_tj_d[i]);
-              }
-
-              for (int i = 0; i < 100; ++i) {
-                cout << tj_s[i] << ", " << tj_d[i];
-                if (i > 0) {
-                  double dist = distance(tj_s[i], tj_d[i], tj_s[i-1], tj_d[i-1]);
-                  cout << " dist: " << dist << endl;
-                }
-              }
-              // hello
-            }
-            else {
-              // Extrapolate previous trajectory
-              int N = num_wp - prev_size;
-              double vt = max_speed;
-              double s0 = initial_state[0];
-              double vn = initial_state[4];
-              double d0 = initial_state[3];
-              
-              for (int i = 1; i <= N; ++i) {
-                // cout << "ref_yaw: " << ref_yaw << endl;
-                double s1 = s0 + (vt * i * dt);
-                double d1 = d0 + (vn * i * dt);
-
-                tj_s.push_back(s1);
-                tj_d.push_back(d1);
-              }
+            for (int i = 0; i < new_tj_s.size(); ++i) {
+              tj_s.push_back(new_tj_s[i]);
+              tj_d.push_back(new_tj_d[i]);
             }
 
+            for (int i = 0; i < 100; ++i) {
+              cout << tj_s[i] << ", " << tj_d[i];
+              if (i > 0) {
+                double dist = distance(tj_s[i], tj_d[i], tj_s[i-1], tj_d[i-1]);
+                cout << " dist: " << dist << endl;
+              }
+            }
+            
             // END - Find best_trajectory
 
             CreateWaypoints(tj_s, tj_d,
