@@ -650,7 +650,7 @@ int main() {
                   cout << " dist: " << dist << endl;
                 }
               }
-
+              // hello
             }
             else {
               // Extrapolate previous trajectory
