@@ -11,113 +11,19 @@
 #include "Eigen-3.3/Eigen/Dense"
 #include "json.hpp"
 #include "spline.h"
+#include "helpers.h"
+#include "cost.h"
 #include <limits>
 
 using namespace std;
 using namespace std::chrono;
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
+using namespace helpers;
 
 
 // for convenience
 using json = nlohmann::json;
-
-// To printout vector quickly
-template <typename T>
-std::ostream& operator<< (std::ostream& out, const std::vector<T>& v) {
-  if ( !v.empty() ) {
-    out << '[';
-    std::copy (v.begin(), v.end(), std::ostream_iterator<T>(out, ", "));
-    out << "\b\b]";
-  }
-  return out;
-}
-
-// For converting back and forth between radians and degrees.
-constexpr double pi() { return M_PI; }
-double deg2rad(double x) { return x * pi() / 180; }
-double rad2deg(double x) { return x * 180 / pi(); }
-
-// Mile per hour to meter per second.
-double mph2mps(double x) { return x * 0.447; }
-
-// Reversed.
-double mps2mph(double x) { return x / 0.447; }
-
-// Gets d (in meters from center of road) of a lane.
-double lane2d(int lane) { return 2.0+4.0*lane; }
-
-// Converts d to lane number
-int d2lane(double d) { return (int)(((d-2.0)/4.0) + 0.5); }
-
-// Remove N elements from a vector.
-void RemoveN(int N, vector<double> *myvector) {
-  std::vector<double>((*myvector).begin()+N,
-                      (*myvector).end()).swap((*myvector));
-}
-
-// Checks if the SocketIO event has JSON data.
-// If there is data the JSON object in string format will be returned,
-// else the empty string "" will be returned.
-string hasData(string s) {
-  auto found_null = s.find("null");
-  auto b1 = s.find_first_of("[");
-  auto b2 = s.find_first_of("}");
-  if (found_null != string::npos) {
-    return "";
-  } else if (b1 != string::npos && b2 != string::npos) {
-    return s.substr(b1, b2 - b1 + 2);
-  }
-  return "";
-}
-
-double distance(double x1, double y1, double x2, double y2)
-{
-	return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
-}
-int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> maps_y)
-{
-
-	double closestLen = 100000; //large number
-	int closestWaypoint = 0;
-
-	for(int i = 0; i < maps_x.size(); i++)
-	{
-		double map_x = maps_x[i];
-		double map_y = maps_y[i];
-		double dist = distance(x,y,map_x,map_y);
-		if(dist < closestLen)
-		{
-			closestLen = dist;
-			closestWaypoint = i;
-		}
-
-	}
-
-	return closestWaypoint;
-
-}
-
-int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
-{
-
-	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-
-	double map_x = maps_x[closestWaypoint];
-	double map_y = maps_y[closestWaypoint];
-
-	double heading = atan2( (map_y-y),(map_x-x) );
-
-	double angle = abs(theta-heading);
-
-	if(angle > pi()/4)
-	{
-		closestWaypoint++;
-	}
-
-	return closestWaypoint;
-
-}
 
 // getXY function with spline implementation
 // We do not use the default Udacity functions for getXY as it created gaps between
@@ -303,7 +209,8 @@ vector<double> CalcCoeffs(vector<double> initial_state, vector<double> final_sta
 
 tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
                                                          double T,
-                                                         double dt=0.02) {
+                                                         double dt,
+                                                         int num_wp = -1) {
   /*
   From coefficients and final position,
   get list of s and d coordinates.
@@ -319,6 +226,7 @@ tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
   coeffs - Coefficients (alphas) calculated from CalcCoeffs() function.
   T      - Total duration in seconds.
   dt     - Duration of a single timeframe.
+  num_wp - Number of waypoints to get. -1 for all waypoints.
 
   OUTPUT
   A tuple with list of s coordinates as the first element, and list of y coordinates as the
@@ -331,8 +239,9 @@ tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
   tuple<vector<double>, vector<double>> results;
   vector<double> list_s;
   vector<double> list_d;
+  int wps = min((int)(T/dt), num_wp);
 
-  for (int i=1; i <= T/dt; ++i) {
+  for (int i=1; i <= wps; ++i) {
     double t = i * dt;
     
     double s = s_coeffs[0]         + s_coeffs[1] * t       + s_coeffs[2] * t*t +
@@ -380,26 +289,6 @@ void CreateWaypoints(vector<double> list_s, vector<double> list_d,
     (*next_y_vals).push_back(yf);
     xy0 = xy1;
   }
-}
-
-vector<double> StateFromTJ(const vector<double> &tj,
-                           double dt) {
-  /*
-  Calculate position, speed, and acceleration from the trajectory's last three positions.
-  */
-  assert(tj.size() > 2);
-  double s1 = tj[tj.size()-1];
-  double s2 = tj[tj.size()-2];
-  double s3 = tj[tj.size()-3];
-  double v1 = (s1-s2) / dt;
-  double v2 = (s2-s3) / dt;
-  double a = (v1-v2) / dt;
-  vector<double> state = {
-    s1,
-    v1,
-    a
-  };
-  return state;
 }
 
 double YawFromTJ(const vector<double> &tj_s,
@@ -459,25 +348,43 @@ void TestFrenetDistance(const vector<double> maps_s,
 }
 
 void FindBestTrajectory(const vector<double> &initial_state,
-                        double max_speed,
+                        int num_wp,
+                        double target_speed,
                         const json &sensor_fusion,
 
                         vector<double> *new_tj_s,
                         vector<double> *new_tj_d,
                         double dt = 0.02) {
 
+  /**
+   * INPUTS:
+   * 
+   * initial_state - State of the origin of waypoints.
+   * num_wp - Number of waypoints of the resulting trajectory.
+   * target_speed - Target speed of final waypoint.
+   * sensor_fusion - Gathered from sensors in the vehicle.
+   * dt - Tiem of each iteration in seconds.
+   *
+   *
+   * OUTPUTS:
+   * new_tj_s - Trajectory of s direction.
+   */
   double target_T = 4.5;
   double min_cost = 99999999.9;
-  tuple<vector<double>, vector<double>> *best_traj;
+  tuple<vector<double>, vector<double>> best_traj;
+
+  cout << "num_wp: " << num_wp << endl;
 
   for (int target_lane = 0; target_lane <= 2; target_lane++) {
     // Try out various lanes
     for (double ds = 4.0; ds <= 30.0; ds+=2.0) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
-      double target_v = max_speed;
+      double target_v = target_speed;
 
       if (initial_state[3] != target_lane) {
+        // Slower speed when changing lane
+        // TODO: Find the right parameter.
         target_v -= 30/100 * target_v;
       }
 
@@ -496,15 +403,45 @@ void FindBestTrajectory(const vector<double> &initial_state,
       int N = target_T / dt;
 
       vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
-      tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt);
-      double cost = CalculateCost(traj, sensor_fusion);
-      if (cost < min_cost) {
-        best_traj = *traj;
+      tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt, num_wp);
+      double c = 0;
+
+      c += cost::CalcOrientationCost(traj);
+      c += cost::CalcSpeedCost(traj, target_v, dt);
+
+      if (c < min_cost) {
+        best_traj = traj;
+        // cout << "Set best_traj to traj (size " << get<0>(traj).size() << ")" << endl;
       }
     }
   }
-  (*new_tj_s) = get<0>(&best_traj);
-  (*new_tj_d) = get<1>(&best_traj);
+
+
+  // Get only the first `num_wp` waypoints.
+
+  int nwp = num_wp;
+  if (nwp > get<0>(best_traj).size()) {
+    nwp = get<0>(best_traj).size();
+  }
+
+  // TODO: Test this
+  // vector<double>::const_iterator first =  get<0>(best_traj).begin();
+  // vector<double>::const_iterator last =  get<0>(best_traj).begin() + nwp;
+  // vector<double> tj_s(first, last);
+  // (*new_tj_s) = tj_s;
+
+  // first =  get<1>(best_traj).begin();
+  // last =  get<1>(best_traj).begin() + nwp;
+  // vector<double> tj_d(first, last);
+  // (*new_tj_d) = tj_d;
+
+  (*new_tj_s) = get<0>(best_traj);
+  (*new_tj_d) = get<1>(best_traj);
+
+  cout << "set new_tj_s with tj_s with size " << (*new_tj_s).size() << endl;
+  for (int i=0; i < (*new_tj_s).size(); ++i) {
+    cout << (*new_tj_s)[i] << ", " << (*new_tj_d)[i] << endl;
+  }
 }
 
 // Trajectory for s and d.
@@ -513,13 +450,15 @@ vector<double> tj_d;
 // Time of created trajectory
 vector<double> tj_t;
 
-bool first = true;
-
 milliseconds ms = duration_cast<milliseconds>(
   system_clock::now().time_since_epoch()
 );
 
 int main() {
+
+  cost::testIsWrongDirection();
+  cost::testCalcSpeedCost();
+
   uWS::Hub h;
 
   // Load up map values for waypoint's x,y,s and d normalized normal vectors
@@ -587,7 +526,7 @@ int main() {
             double dt = 0.02;
             ms = new_ms;
             cout << dt << endl;
-            double num_wp = 120;
+            int num_wp = 120;
           
         	// Main car's localization Data
           	double car_x = j[1]["x"];
@@ -605,7 +544,7 @@ int main() {
           	// Previous path data given to the Planner
           	auto previous_path_x = j[1]["previous_path_x"];
           	auto previous_path_y = j[1]["previous_path_y"];
-            int prev_size = previous_path_x.size();
+            int prev_size = (int)previous_path_x.size();
 
           	// Previous path's end s and d values 
           	double end_path_s = j[1]["end_path_s"];
@@ -621,7 +560,7 @@ int main() {
 
             double max_accel_t = mph2mps(3.0);
             double max_accel_n = mph2mps(3.0);
-            double max_speed = mph2mps(10.0);
+            double max_speed = mph2mps(20.0);
 
             vector<double> initial_state = {};
 
@@ -645,20 +584,28 @@ int main() {
             vector<double> new_tj_s;
             vector<double> new_tj_d;
 
-            FindBestTrajectory(initial_state, max_speed,
-                               sensor_fusion, &new_tj_s, &new_tj_d);
-            first = false;
+            int num_remaining_wp = (num_wp - prev_size);
 
-            for (int i = 0; i < new_tj_s.size(); ++i) {
+            if (num_remaining_wp > 2) {
+              
+            } 
+
+            FindBestTrajectory(initial_state, num_remaining_wp, max_speed,
+                               sensor_fusion, &new_tj_s, &new_tj_d);
+
+            cout << "Best trajectory:" << endl;
+
+           for (int i = 0; i < new_tj_s.size(); ++i) {
               tj_s.push_back(new_tj_s[i]);
               tj_d.push_back(new_tj_d[i]);
+              cout << new_tj_s[i] << ", " << new_tj_d[i] << endl;
             }
-
-            for (int i = 0; i < 100; ++i) {
-              cout << tj_s[i] << ", " << tj_d[i];
+            
+            for (int i = 0; i < tj_s.size(); ++i) {
+              // cout << tj_s[i] << ", " << tj_d[i];
               if (i > 0) {
                 double dist = distance(tj_s[i], tj_d[i], tj_s[i-1], tj_d[i-1]);
-                cout << " dist: " << dist << endl;
+                // cout << " dist: " << dist << endl;
               }
             }
             
