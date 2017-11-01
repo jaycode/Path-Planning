@@ -349,7 +349,7 @@ void TestFrenetDistance(const vector<double> maps_s,
 
 void FindBestTrajectory(const vector<double> &initial_state,
                         int num_wp,
-                        double target_speed,
+                        constraints t_const,
                         const json &sensor_fusion,
 
                         vector<double> *new_tj_s,
@@ -361,7 +361,8 @@ void FindBestTrajectory(const vector<double> &initial_state,
    * 
    * initial_state - State of the origin of waypoints.
    * num_wp - Number of waypoints of the resulting trajectory.
-   * target_speed - Target speed of final waypoint.
+   * t_const - Constraints of trajectory.
+   *           Contains maximum allowed speed and accelerations.
    * sensor_fusion - Gathered from sensors in the vehicle.
    * dt - Tiem of each iteration in seconds.
    *
@@ -375,12 +376,14 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
   cout << "num_wp: " << num_wp << endl;
 
+  int best_target_lane;
+  double best_ds;
   for (int target_lane = 0; target_lane <= 2; target_lane++) {
     // Try out various lanes
-    for (double ds = 4.0; ds <= 30.0; ds+=2.0) {
+    for (double ds = 5.0; ds <= 100.0; ds+=5.0) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
-      double target_v = target_speed;
+      double target_v = t_const.max_v;
 
       if (initial_state[3] != target_lane) {
         // Slower speed when changing lane
@@ -406,17 +409,23 @@ void FindBestTrajectory(const vector<double> &initial_state,
       tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt, num_wp);
       double c = 0;
 
-      c += cost::CalcOrientationCost(traj);
-      c += cost::CalcSpeedCost(traj, target_v, dt);
+      c += cost::OrientationCost(traj);
+      c += cost::SpeedCost(traj, target_v, dt);
+      c += cost::AccelerationCost(traj, t_const.max_at, t_const.max_an, dt);
+      c += cost::ChangeLaneCost(initial_state, lane2d(target_lane));
+      // cout << "cost: " << c << " min_cost: " << min_cost << endl;
 
       if (c < min_cost) {
         best_traj = traj;
+        min_cost = c;
+        best_target_lane = target_lane;
+        best_ds = ds;
         // cout << "Set best_traj to traj (size " << get<0>(traj).size() << ")" << endl;
       }
     }
   }
 
-
+  cout << "chosen lane | ds: " << best_target_lane << " | " << best_ds << endl;
   // Get only the first `num_wp` waypoints.
 
   int nwp = num_wp;
@@ -424,32 +433,18 @@ void FindBestTrajectory(const vector<double> &initial_state,
     nwp = get<0>(best_traj).size();
   }
 
-  // TODO: Test this
-  // vector<double>::const_iterator first =  get<0>(best_traj).begin();
-  // vector<double>::const_iterator last =  get<0>(best_traj).begin() + nwp;
-  // vector<double> tj_s(first, last);
-  // (*new_tj_s) = tj_s;
-
-  // first =  get<1>(best_traj).begin();
-  // last =  get<1>(best_traj).begin() + nwp;
-  // vector<double> tj_d(first, last);
-  // (*new_tj_d) = tj_d;
-
   (*new_tj_s) = get<0>(best_traj);
   (*new_tj_d) = get<1>(best_traj);
 
-  cout << "set new_tj_s with tj_s with size " << (*new_tj_s).size() << endl;
-  for (int i=0; i < (*new_tj_s).size(); ++i) {
-    cout << (*new_tj_s)[i] << ", " << (*new_tj_d)[i] << endl;
-  }
+  // cout << "set new_tj_s with tj_s with size " << (*new_tj_s).size() << endl;
+  // for (int i=0; i < (*new_tj_s).size(); ++i) {
+  //   cout << (*new_tj_s)[i] << ", " << (*new_tj_d)[i] << endl;
+  // }
 }
 
 // Trajectory for s and d.
-vector<double> tj_s;
-vector<double> tj_d;
-// Time of created trajectory
-vector<double> tj_t;
-
+vector<double> prev_tj_s;
+vector<double> prev_tj_d;
 milliseconds ms = duration_cast<milliseconds>(
   system_clock::now().time_since_epoch()
 );
@@ -457,7 +452,7 @@ milliseconds ms = duration_cast<milliseconds>(
 int main() {
 
   cost::testIsWrongDirection();
-  cost::testCalcSpeedCost();
+  cost::testSpeedCost();
 
   uWS::Hub h;
 
@@ -525,7 +520,7 @@ int main() {
             // double dt = (double)(new_ms - ms).count() / 1000;
             double dt = 0.02;
             ms = new_ms;
-            cout << dt << endl;
+            // cout << dt << endl;
             int num_wp = 120;
           
         	// Main car's localization Data
@@ -558,28 +553,43 @@ int main() {
           	vector<double> next_x_vals;
           	vector<double> next_y_vals;
 
-            double max_accel_t = mph2mps(3.0);
-            double max_accel_n = mph2mps(3.0);
-            double max_speed = mph2mps(20.0);
+            // START - Include previous trajectory
+            for (int i = 0; i < previous_path_x.size(); ++i) {
+              next_x_vals.push_back(previous_path_x[i]);
+              next_y_vals.push_back(previous_path_y[i]);
+            }
+            // END - Include previous trajectory
+
+            // START - Setup initial state
+            double max_accel_t = 1.0;
+            double max_accel_n = 3.0;
+            double max_speed = mph2mps(40.0);
+
+            constraints t_const = {};
+            t_const.max_v = max_speed;
+            t_const.max_at = max_accel_t;
+            t_const.max_an = max_accel_n;
 
             vector<double> initial_state = {};
 
-            if (tj_s.size() <= 2) {
-              initial_state = {car_s, 0, 0,
+            if (prev_size <= 2) {
+              initial_state = {car_s, car_speed, 0,
                                car_d, 0, 0};
               ref_yaw = car_yaw;
             }
             else {
-              SetupInitialState(tj_s, tj_d,
+              SetupInitialState(prev_tj_s, prev_tj_d,
                                 &initial_state,
                                 dt);
-              ref_yaw = YawFromTJ(tj_s, tj_d,
+              ref_yaw = YawFromTJ(prev_tj_s, prev_tj_d,
                                   map_waypoints_s, map_waypoints_x, map_waypoints_y);
             }
 
             assert(initial_state.size() > 0);
 
-            // Find best trajectory
+            // END - Setup initial state
+
+            // START - Find best trajectory
 
             vector<double> new_tj_s;
             vector<double> new_tj_d;
@@ -587,35 +597,46 @@ int main() {
             int num_remaining_wp = (num_wp - prev_size);
 
             if (num_remaining_wp > 2) {
+              // Only find best trajectories when remaining wp is more than 2.
+              // This is needed to find final position's speed and trajectory
+              // accelerations in cost functions.
+
+              FindBestTrajectory(initial_state, num_remaining_wp, t_const,
+                                 sensor_fusion, &new_tj_s, &new_tj_d);
+
+              // cout << "Best trajectory:" << endl;
+
+              // Erase previous trajectory
+              prev_tj_s.clear();
+              prev_tj_d.clear();
+
+              for (int i = 0; i < new_tj_s.size(); ++i) {
+                prev_tj_s.push_back(new_tj_s[i]);
+                prev_tj_d.push_back(new_tj_d[i]);
+                // cout << new_tj_s[i] << ", " << new_tj_d[i] << endl;
+              }
+              
+              for (int i = 0; i < new_tj_s.size(); ++i) {
+                // cout << new_tj_s[i] << ", " << new_tj_d[i];
+                if (i > 0) {
+                  double dist = distance(new_tj_s[i], new_tj_d[i],
+                                         new_tj_s[i-1], new_tj_d[i-1]);
+                  // cout << " dist: " << dist << endl;
+                }
+              }
+              
+              // END - Find best_trajectory
+
+              CreateWaypoints(new_tj_s, new_tj_d,
+                              map_waypoints_s, map_waypoints_x, map_waypoints_y,
+                              &next_x_vals, &next_y_vals);
+
+              cout << endl;
               
             } 
 
-            FindBestTrajectory(initial_state, num_remaining_wp, max_speed,
-                               sensor_fusion, &new_tj_s, &new_tj_d);
 
-            cout << "Best trajectory:" << endl;
-
-           for (int i = 0; i < new_tj_s.size(); ++i) {
-              tj_s.push_back(new_tj_s[i]);
-              tj_d.push_back(new_tj_d[i]);
-              cout << new_tj_s[i] << ", " << new_tj_d[i] << endl;
-            }
-            
-            for (int i = 0; i < tj_s.size(); ++i) {
-              // cout << tj_s[i] << ", " << tj_d[i];
-              if (i > 0) {
-                double dist = distance(tj_s[i], tj_d[i], tj_s[i-1], tj_d[i-1]);
-                // cout << " dist: " << dist << endl;
-              }
-            }
-            
-            // END - Find best_trajectory
-
-            CreateWaypoints(tj_s, tj_d,
-                            map_waypoints_s, map_waypoints_x, map_waypoints_y,
-                            &next_x_vals, &next_y_vals);
-
-            cout << endl;
+            // cout << "size of next trajectory: " << next_x_vals.size() << endl;
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
           	msgJson["next_x"] = next_x_vals;
