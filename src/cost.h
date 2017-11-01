@@ -42,7 +42,10 @@ namespace {
     double AccelerationCost(const tuple<vector<double>, vector<double>> &traj,
                             double max_at,
                             double max_an,
-                            double dt) {
+                            double dt,
+                            const vector<double> map_waypoints_s,
+                            const vector<double> map_waypoints_x,
+                            const vector<double> map_waypoints_y) {
       /**
        * Raises flag when maximum acceleration is higher than the allowed limit.
        */
@@ -50,15 +53,28 @@ namespace {
       vector<double> tj_d = get<1>(traj);
       double cost = 0.0;
       for (int i = 2; i < (int)tj_s.size(); ++i) {
+
+        vector<double> xy1 = getXY(tj_s[i], tj_d[i], map_waypoints_s, map_waypoints_x, map_waypoints_y);
+        vector<double> xy2 = getXY(tj_s[i-1], tj_d[i-1], map_waypoints_s, map_waypoints_x, map_waypoints_y);
+        vector<double> xy3 = getXY(tj_s[i-2], tj_d[i-2], map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
+        // double at = acceleration(xy1[0], xy1[1],
+        //                          xy2[0], xy2[1],
+        //                          xy3[0], xy3[1],
+        //                          dt);
         double at = acceleration(tj_s[i], tj_d[i],
                                  tj_s[i-1], tj_d[i-1],
                                  tj_s[i-2], tj_d[i-2],
                                  dt);
         if (at > max_at) {
           cost = 999.0;
-          cout << "failed acceleration limit (" << at << " > " << max_at << ")" << endl;
+          cout << "err_acc (" << at << " > " << max_at << ")" << endl;
           break;
         }
+      }
+
+      if (cost == 0.0) {
+        cout << "-" << endl;
       }
       return cost;
     }
@@ -82,6 +98,7 @@ namespace {
       for (int i = 0; i < tj_s.size(); ++i) {
         if (i > 0 and tj_s[i] < tj_s[i-1]) {
           wrong_dir = true;
+          cout << "err_dir ";
           break;
         }
       }
