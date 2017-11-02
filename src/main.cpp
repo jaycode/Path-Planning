@@ -251,10 +251,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
                         vector<double> *new_tj_s,
                         vector<double> *new_tj_d,
-                        double dt,
-                        const vector<double> map_waypoints_s,
-                        const vector<double> map_waypoints_x,
-                        const vector<double> map_waypoints_y) {
+                        double dt) {
 
   /**
    * INPUTS:
@@ -323,8 +320,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
       // cout << "l: " << target_lane << " ds: " << ds << " ";
       c += cost::OrientationCost(traj);
       c += cost::SpeedCost(traj, target_v, dt);
-      c += cost::AccelerationCost(traj, t_const.max_at, t_const.max_an, dt,
-                                  map_waypoints_s, map_waypoints_x, map_waypoints_y);
+      c += cost::AccelerationCost(traj, t_const.max_at, t_const.max_an, dt);
       // cout << "cost: " << c << " min_cost: " << min_cost << endl;
 
       if (c < min_cost) {
@@ -536,8 +532,7 @@ int main() {
               // accelerations in cost functions.
 
               FindBestTrajectory(initial_state, num_remaining_wp, t_const,
-                                 sensor_fusion, &new_tj_s, &new_tj_d, dt,
-                                 map_waypoints_s, map_waypoints_x, map_waypoints_y);
+                                 sensor_fusion, &new_tj_s, &new_tj_d, dt);
 
               // cout << "Best trajectory:" << endl;
 
