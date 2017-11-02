@@ -276,7 +276,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
   cout << "num_wp: " << num_wp << endl;
   cout << "target_v: " << t_const.max_v << endl;
   
-  int target_lane = 2;
+  int target_lane = 1;
   double best_ds;
   double best_T;
 
