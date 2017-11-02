@@ -26,39 +26,59 @@ namespace {
       return cost;
     }
 
-    double SpeedCost(const tuple<vector<double>, vector<double>> &traj,
-                     double target_v,
-                     double dt) {
-      /**
-       * How close is final waypoints' speed to the target speed?
-       */
-      vector<double> tj_s = get<0>(traj);
-      vector<double> state = StateFromTJ(tj_s, dt);
-      double v = state[1];
-      // cout << "target_v | v: " << target_v << " | " << v << endl;
-      return (fabs(target_v - v));
-    }
 
-    double AccelerationCost(const tuple<vector<double>, vector<double>> &traj,
+    double MovementCost(const tuple<vector<double>, vector<double>> &traj,
+                            double max_v,
                             double max_at,
-                            double max_an,
+                            double max_jerk,
                             double dt) {
       /**
-       * Raises flag when maximum acceleration is higher than the allowed limit.
+       * Raises flag (i.e. large error) when either:
+       * - maximum velocity,
+       * - maximum acceleration,
+       * - or maximum jerk,
+       * is higher than the allowed limit.
        */
       vector<double> tj_s = get<0>(traj);
       vector<double> tj_d = get<1>(traj);
       double cost = 0.0;
-      for (int i = 2; i < (int)tj_s.size(); ++i) {
+      for (int i = 1; i < (int)tj_s.size(); ++i) {
 
-        double at = acceleration(tj_s[i], // tj_d[i],
-                                 tj_s[i-1], // tj_d[i-1],
-                                 tj_s[i-2], // tj_d[i-2],
-                                 dt);
-        if (at > max_at) {
+        double v = velocity(tj_s[i], tj_s[i-1], dt);
+        if (v > max_v) {
           cost = 999.0;
-          cout << "err_acc (" << at << " > " << max_at << ")" << endl;
+          // cout << "err_speed (" << v << " > " << max_v << ")" << endl;
           break;
+        }
+        if (v < 0.0) {
+          cost = 999.0;
+          // cout << "err_orient" << endl;
+          break;
+        }
+
+        if (i > 1) {
+          double at = acceleration(tj_s[i], // tj_d[i],
+                                   tj_s[i-1], // tj_d[i-1],
+                                   tj_s[i-2], // tj_d[i-2],
+                                   dt);
+          if (fabs(at) > max_at) {
+            cost = 999.0;
+            // cout << "err_acc (" << at << " > " << max_at << ")" << endl;
+            break;
+          }
+
+          if (i > 2) {
+            double at1 = acceleration(tj_s[i-1],
+                                      tj_s[i-2],
+                                      tj_s[i-3],
+                                      dt);
+            double jerk = (at - at1) / dt;
+            if (fabs(jerk) > max_jerk) {
+              cost = 999.0;
+              cout << "err_jerk (" << jerk << " > " << max_jerk << ")" << endl;
+              break;
+            }
+          }
         }
       }
 
@@ -74,6 +94,8 @@ namespace {
       /**
        * Calculate the cost of a lane given current vehicle and other vehicles.
        */
+      double s = initial_state[0];
+      double dist = 10.0;
 
       return(0.0);
     }
@@ -115,21 +137,6 @@ namespace {
       get<0>(traj) = tj_s1;
       get<1>(traj) = tj_d1;
       assert(IsWrongDirection(traj));
-
-    }
-
-    void testSpeedCost() {
-
-      tuple<vector<double>, vector<double>> traj;
-      vector<double> tj_s = {1.0, 3.0, 3.5};
-      vector<double> tj_d = {1.0, 1.0, 1.0};
-      double dt = 0.02;
-      double target_v = 0.5 / 0.02;
-
-      get<0>(traj) = tj_s;
-      get<1>(traj) = tj_d;
-
-      assert(SpeedCost(traj, target_v, dt) == 0.0);
 
     }
 

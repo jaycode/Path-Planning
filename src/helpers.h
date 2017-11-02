@@ -26,7 +26,7 @@ namespace {
     struct constraints {
       double max_v;
       double max_at; // tangential acceleration
-      double max_an; // normal acceleration
+      double max_jerk;
     };
 
     // For converting back and forth between radians and degrees.
@@ -100,6 +100,21 @@ namespace {
       double v2 = velocity(x2, x3, dt);
       // cout << "v1: " << v1 << ", v2: " << v2 << ", at: " << ((v1-v2)/dt) << endl;
       return ((v1-v2)/dt);
+    }
+
+    double jerk(double x1,
+                double x2,
+                double x3,
+                double x4,
+                double dt) {
+      /**
+       * Calculate jerk from four points.
+       * Earlier points are closer to final position.
+       */
+
+      double a1 = acceleration(x1, x2, x3, dt);
+      double a2 = acceleration(x2, x3, x4, dt);
+      return ((a1-a2)/dt);
     }
 
     int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> maps_y)

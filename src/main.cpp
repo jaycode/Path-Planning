@@ -25,6 +25,9 @@ using namespace helpers;
 // for convenience
 using json = nlohmann::json;
 
+// For testing turning and slowing down.
+int counter = 0;
+
 
 vector<double> JMT(vector< double> start, vector <double> end, double T)
 {
@@ -251,7 +254,10 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
                         vector<double> *new_tj_s,
                         vector<double> *new_tj_d,
-                        double dt) {
+                        double dt,
+                        const vector<double> previous_tj_s = {},
+                        const vector<double> previous_tj_d = {}
+                        ) {
 
   /**
    * INPUTS:
@@ -261,6 +267,8 @@ void FindBestTrajectory(const vector<double> &initial_state,
    * t_const - Constraints of trajectory.
    *           Contains maximum allowed speed and accelerations.
    * sensor_fusion - Gathered from sensors in the vehicle.
+   * previous_tj_s - List of s from the previous trajectory.
+   * previous_tj_d - List of d from the previous trajectory.
    * dt - Tiem of each iteration in seconds.
    *
    *
@@ -271,11 +279,11 @@ void FindBestTrajectory(const vector<double> &initial_state,
   tuple<vector<double>, vector<double>> best_traj;
 
   cout << "num_wp: " << num_wp << endl;
-  cout << "target_v: " << t_const.max_v << endl;
   
   int target_lane = 1;
   double best_ds;
   double best_T;
+  tuple<vector<double>, vector<double>> best_comb_traj;
 
   // Find best lane
   for (int lane = 0; lane <= 2; lane++) {
@@ -288,15 +296,25 @@ void FindBestTrajectory(const vector<double> &initial_state,
   // target_T (time to reach that distance), calculate the cost
   // function for each generated trajectory, and then pick the trajectory
   // with the smallest cost value.
+
+  vector<double> act_initial_state = {
+    0,
+    initial_state[1],
+    initial_state[2],
+    0,
+    initial_state[4],
+    initial_state[5],
+  };
   for (double ds = 5.0; ds <= 50.0; ds += 5.0) {
-    for (double target_T = 1.5; target_T <= 6.0; target_T += 0.5) {
+    for (double target_T = 1.5; target_T <= 20.0; target_T += 0.5) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
+      // double target_s = ds;
       double target_v = t_const.max_v;
 
       if (d2lane(initial_state[3]) != target_lane) {
         // Slower speed when changing lane
-        target_v = mph2mps(40.0);
+        // target_v = mph2mps(40.0);
       }
  
       vector<double> target_state = {
@@ -308,7 +326,6 @@ void FindBestTrajectory(const vector<double> &initial_state,
         0
       };
 
-      // cout << "initial state: " << initial_state << endl;
       // cout << "target state: " << target_state << endl;
 
       int N = target_T / dt;
@@ -317,14 +334,49 @@ void FindBestTrajectory(const vector<double> &initial_state,
       tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt, num_wp);
       double c = 0;
 
+      // START - Create comb_traj
+
+      // Combine a maximum of last three waypoints of previous trajectory with the new ones.
+      // This step is important so we can calculate MovementCost
+      // throughout the whole combined trajectory (i.e. jerk calculation requires a minimum
+      // of 4 points).
+      tuple<vector<double>, vector<double>> comb_traj;
+
+      // This is the part that fills with previous trajectory
+      vector<double> comb_tj_s;
+      vector<double> comb_tj_d;
+      int prevsize = (int)previous_tj_s.size();
+      for (int i = min(3, prevsize); i > 0; --i) {
+        double s = previous_tj_s[prevsize - i];
+        comb_tj_s.push_back(s);
+        double d = previous_tj_d[prevsize - i];
+        comb_tj_d.push_back(d);
+      }
+
+      // This is the part that append with new trajectory
+      for (int i=0; i < (int)get<0>(traj).size(); ++i) {
+        // get<0>(traj)[i] += initial_state[0];
+        // get<1>(traj)[i] += initial_state[3];
+
+        comb_tj_s.push_back(get<0>(traj)[i]);
+        comb_tj_d.push_back(get<1>(traj)[i]);
+      }
+      get<0>(comb_traj) = comb_tj_s;
+      get<1>(comb_traj) = comb_tj_d;
+
+      // END - Create comb_traj
+
+      // cout << "total comb_tj_s: " << comb_tj_s.size() << endl;
+
       // cout << "l: " << target_lane << " ds: " << ds << " ";
-      c += cost::OrientationCost(traj);
-      c += cost::SpeedCost(traj, target_v, dt);
-      c += cost::AccelerationCost(traj, t_const.max_at, t_const.max_an, dt);
+      // c += cost::OrientationCost(traj);
+      c += cost::MovementCost(comb_traj, target_v, t_const.max_at, t_const.max_jerk, dt);
+      // c += cost::CollisionCost();
       // cout << "cost: " << c << " min_cost: " << min_cost << endl;
 
       if (c < min_cost) {
         best_traj = traj;
+        best_comb_traj = comb_traj;
         min_cost = c;
         best_ds = ds;
         best_T = target_T;
@@ -334,6 +386,8 @@ void FindBestTrajectory(const vector<double> &initial_state,
   }
   // END - Find best trajectory
 
+  cout << "initial state: " << initial_state << endl;
+  cout << "target_v: " << t_const.max_v << endl;
   cout << "chosen lane: " << target_lane << 
           " | ds: " << best_ds << " | T: " << best_T <<
           " | cost: " << min_cost << endl;
@@ -348,17 +402,25 @@ void FindBestTrajectory(const vector<double> &initial_state,
   (*new_tj_d) = get<1>(best_traj);
 
   // cout << "set new_tj_s with tj_s with size " << (*new_tj_s).size() << endl;
-  for (int i=0; i < (*new_tj_s).size(); ++i) {
-    cout << (*new_tj_s)[i] << ", " << (*new_tj_d)[i];
+  vector <double> comb_traj_s = get<0>(best_comb_traj);
+  vector <double> comb_traj_d = get<1>(best_comb_traj);
+  for (int i=0; i < comb_traj_s.size(); ++i) {
+    cout << comb_traj_s[i] << ", " << comb_traj_d[i];
 
     if (i > 0) {
-      cout << " v: " << velocity((*new_tj_s)[i],
-                                 (*new_tj_s)[i-1], dt);
+      cout << " v: " << velocity(comb_traj_s[i],
+                                 comb_traj_s[i-1], dt);
     } 
     if (i > 1) {
-      cout << " a: " << acceleration((*new_tj_s)[i],
-                                     (*new_tj_s)[i-1],
-                                     (*new_tj_s)[i-2], dt);
+      cout << " a: " << acceleration(comb_traj_s[i],
+                                     comb_traj_s[i-1],
+                                     comb_traj_s[i-2], dt);
+    }
+    if (i > 2) {
+      cout << " j: " << jerk(comb_traj_s[i],
+                             comb_traj_s[i-1],
+                             comb_traj_s[i-2],
+                             comb_traj_s[i-3], dt);
     }
     cout << endl;
   }
@@ -371,17 +433,16 @@ milliseconds ms = duration_cast<milliseconds>(
   system_clock::now().time_since_epoch()
 );
 
-string traj_log_file = "../log/traj_log.csv";
-ofstream traj_log;
+// string traj_log_file = "../log/traj_log.csv";
+// ofstream traj_log;
 
 int main() {
 
-  traj_log.open(traj_log_file);
-  traj_log << "S, Vt, At, T\n";
-  traj_log.close();
+  // traj_log.open(traj_log_file);
+  // traj_log << "S, Vt, At, T\n";
+  // traj_log.close();
 
   cost::testIsWrongDirection();
-  cost::testSpeedCost();
 
   uWS::Hub h;
 
@@ -398,6 +459,8 @@ int main() {
   // string map_file_ = "../data/highway_map_bosch1 - final.csv";
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
+
+  counter = 0;
 
   ifstream in_map_(map_file_.c_str(), ifstream::in);
 
@@ -491,18 +554,22 @@ int main() {
             // END - Include previous trajectory
 
             // START - Setup initial state
-            double max_accel_t = 5.0;
-            double max_accel_n = 3.0;
+            double max_accel_t = 8.0;
+            // double max_accel_n = 3.0;
+            double max_jerk = 8.0;
             double max_speed = mph2mps(45.0);
+            if (counter > 200) {
+              max_speed = mph2mps(30.0);
+            }
 
             constraints t_const = {};
             t_const.max_v = max_speed;
             t_const.max_at = max_accel_t;
-            t_const.max_an = max_accel_n;
+            t_const.max_jerk = max_jerk;
 
             vector<double> initial_state = {};
 
-            if (prev_size <= 2) {
+            if ((int)prev_tj_s.size() <= 2) {
               initial_state = {car_s, car_speed, 0,
                                car_d, 0, 0};
               ref_yaw = car_yaw;
@@ -527,12 +594,12 @@ int main() {
             int num_remaining_wp = (num_wp - prev_size);
 
             if (num_remaining_wp > 2) {
-              // Only find best trajectories when remaining wp is more than 2.
-              // This is needed to find final position's speed and trajectory
-              // accelerations in cost functions.
+              // To ensure we always have at least 3 prev_tj_s and prev_tj_d.
 
               FindBestTrajectory(initial_state, num_remaining_wp, t_const,
-                                 sensor_fusion, &new_tj_s, &new_tj_d, dt);
+                                 sensor_fusion,
+                                 &new_tj_s, &new_tj_d, dt,
+                                 prev_tj_s, prev_tj_d);
 
               // cout << "Best trajectory:" << endl;
 
@@ -562,8 +629,9 @@ int main() {
                               &next_x_vals, &next_y_vals);
 
               cout << endl;
-              
-            } 
+
+            }
+            
 
 
             // cout << "size of next trajectory: " << next_x_vals.size() << endl;
@@ -576,7 +644,7 @@ int main() {
 
           	//this_thread::sleep_for(chrono::milliseconds(1000));
           	ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
-
+            ++counter;
         }
       } else {
         // Manual driving
