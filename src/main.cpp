@@ -276,31 +276,32 @@ void FindBestTrajectory(const vector<double> &initial_state,
   cout << "num_wp: " << num_wp << endl;
   cout << "target_v: " << t_const.max_v << endl;
   
-  int target_lane = 1;
+  int target_lane = 2;
   double best_ds;
   double best_T;
-  ofstream traj_log;
 
   // Find best lane
-  // traj_log.open(traj_log_file, std::ofstream::out | std::ofstream::app);
   for (int lane = 0; lane <= 2; lane++) {
-    // Try out various lanes
-
+    // If there are other vehicles within a distance, try another lane.
+    cost::LaneCost(initial_state, sensor_fusion, lane);
   }
 
-  // Find best Trajectory
-  for (double ds = 5.0; ds <= 40.0; ds += 5.0) {
+  // START - Find best trajectory.
+  // We do this by trying out various ds (distance of s) and
+  // target_T (time to reach that distance), calculate the cost
+  // function for each generated trajectory, and then pick the trajectory
+  // with the smallest cost value.
+  for (double ds = 5.0; ds <= 50.0; ds += 5.0) {
     for (double target_T = 1.5; target_T <= 6.0; target_T += 0.5) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
       double target_v = t_const.max_v;
 
-      // if (initial_state[3] != target_lane) {
-      //   // Slower speed when changing lane
-      //   // TODO: Find the right parameter.
-      //   target_v -= 30/100 * target_v;
-      // }
-
+      if (d2lane(initial_state[3]) != target_lane) {
+        // Slower speed when changing lane
+        target_v = mph2mps(40.0);
+      }
+ 
       vector<double> target_state = {
         target_s,
         target_v,
@@ -324,7 +325,6 @@ void FindBestTrajectory(const vector<double> &initial_state,
       c += cost::SpeedCost(traj, target_v, dt);
       c += cost::AccelerationCost(traj, t_const.max_at, t_const.max_an, dt,
                                   map_waypoints_s, map_waypoints_x, map_waypoints_y);
-      c += cost::ChangeLaneCost(initial_state, lane2d(target_lane));
       // cout << "cost: " << c << " min_cost: " << min_cost << endl;
 
       if (c < min_cost) {
@@ -336,7 +336,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
       }
     }
   }
-  // traj_log.close();
+  // END - Find best trajectory
 
   cout << "chosen lane: " << target_lane << 
           " | ds: " << best_ds << " | T: " << best_T <<
@@ -497,7 +497,7 @@ int main() {
             // START - Setup initial state
             double max_accel_t = 5.0;
             double max_accel_n = 3.0;
-            double max_speed = mph2mps(40.0);
+            double max_speed = mph2mps(45.0);
 
             constraints t_const = {};
             t_const.max_v = max_speed;

@@ -79,12 +79,14 @@ namespace {
       return cost;
     }
 
-    double ChangeLaneCost(const vector<double> initial_state, double target_d) {
+    double LaneCost(const vector<double> &initial_state,
+                    const json &sensor_fusion,
+                    double lane) {
       /**
-       * Incur a small cost for changing lane.
+       * Calculate the cost of a lane given current vehicle and other vehicles.
        */
 
-      return(fabs(initial_state[3] - target_d));
+      return(0.0);
     }
 
     bool IsWrongDirection(const tuple<vector<double>, vector<double>> &traj) {
