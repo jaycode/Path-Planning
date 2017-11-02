@@ -72,16 +72,32 @@ namespace {
       return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
     }
 
-    double acceleration(double x1, double y1,
-                        double x2, double y2,
-                        double x3, double y3,
+    double velocity(double x1, // double y1,
+                    double x2, // double y2,
+                    double dt) {
+      /**
+       * Calculate acceleration from three points.
+       * Earlier points are closer to final position.
+       */
+      // double v = distance(x1, y1, x2, y2) / dt;
+      double v = (x1 - x2) / dt;
+      // cout << "v1: " << v1 << ", v2: " << v2 << ", at: " << ((v1-v2)/dt) << endl;
+      return v;
+    }
+
+    double acceleration(double x1, // double y1,
+                        double x2, // double y2,
+                        double x3, // double y3,
                         double dt) {
       /**
        * Calculate acceleration from three points.
        * Earlier points are closer to final position.
        */
-      double v1 = distance(x1, y1, x2, y2) / dt;
-      double v2 = distance(x2, y2, x3, y3) / dt;
+      // double v1 = distance(x1, y1, x2, y2) / dt;
+      // double v2 = distance(x2, y2, x3, y3) / dt;
+
+      double v1 = velocity(x1, x2, dt);
+      double v2 = velocity(x2, x3, dt);
       // cout << "v1: " << v1 << ", v2: " << v2 << ", at: " << ((v1-v2)/dt) << endl;
       return ((v1-v2)/dt);
     }

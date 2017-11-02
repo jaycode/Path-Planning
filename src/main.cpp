@@ -270,27 +270,36 @@ void FindBestTrajectory(const vector<double> &initial_state,
    * OUTPUTS:
    * new_tj_s - Trajectory of s direction.
    */
-  double target_T = 4.5;
   double min_cost = 99999999.9;
   tuple<vector<double>, vector<double>> best_traj;
 
   cout << "num_wp: " << num_wp << endl;
   cout << "target_v: " << t_const.max_v << endl;
   
-  int best_target_lane;
+  int target_lane = 1;
   double best_ds;
-  for (int target_lane = 0; target_lane <= 2; target_lane++) {
+  double best_T;
+  ofstream traj_log;
+
+  // Find best lane
+  // traj_log.open(traj_log_file, std::ofstream::out | std::ofstream::app);
+  for (int lane = 0; lane <= 2; lane++) {
     // Try out various lanes
-    for (double ds = 5.0; ds <= 100.0; ds+=5.0) {
+
+  }
+
+  // Find best Trajectory
+  for (double ds = 5.0; ds <= 40.0; ds += 5.0) {
+    for (double target_T = 1.5; target_T <= 6.0; target_T += 0.5) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
       double target_v = t_const.max_v;
 
-      if (initial_state[3] != target_lane) {
-        // Slower speed when changing lane
-        // TODO: Find the right parameter.
-        target_v -= 30/100 * target_v;
-      }
+      // if (initial_state[3] != target_lane) {
+      //   // Slower speed when changing lane
+      //   // TODO: Find the right parameter.
+      //   target_v -= 30/100 * target_v;
+      // }
 
       vector<double> target_state = {
         target_s,
@@ -310,7 +319,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
       tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt, num_wp);
       double c = 0;
 
-      cout << "l: " << target_lane << " ds: " << ds << " ";
+      // cout << "l: " << target_lane << " ds: " << ds << " ";
       c += cost::OrientationCost(traj);
       c += cost::SpeedCost(traj, target_v, dt);
       c += cost::AccelerationCost(traj, t_const.max_at, t_const.max_an, dt,
@@ -321,15 +330,17 @@ void FindBestTrajectory(const vector<double> &initial_state,
       if (c < min_cost) {
         best_traj = traj;
         min_cost = c;
-        best_target_lane = target_lane;
         best_ds = ds;
+        best_T = target_T;
         // cout << "Set best_traj to traj (size " << get<0>(traj).size() << ")" << endl;
       }
     }
   }
+  // traj_log.close();
 
-  cout << "chosen lane: " << best_target_lane << 
-          " | ds: " << best_ds << " | cost: " << min_cost << endl;
+  cout << "chosen lane: " << target_lane << 
+          " | ds: " << best_ds << " | T: " << best_T <<
+          " | cost: " << min_cost << endl;
   // Get only the first `num_wp` waypoints.
 
   int nwp = num_wp;
@@ -341,9 +352,20 @@ void FindBestTrajectory(const vector<double> &initial_state,
   (*new_tj_d) = get<1>(best_traj);
 
   // cout << "set new_tj_s with tj_s with size " << (*new_tj_s).size() << endl;
-  // for (int i=0; i < (*new_tj_s).size(); ++i) {
-  //   cout << (*new_tj_s)[i] << ", " << (*new_tj_d)[i] << endl;
-  // }
+  for (int i=0; i < (*new_tj_s).size(); ++i) {
+    cout << (*new_tj_s)[i] << ", " << (*new_tj_d)[i];
+
+    if (i > 0) {
+      cout << " v: " << velocity((*new_tj_s)[i],
+                                 (*new_tj_s)[i-1], dt);
+    } 
+    if (i > 1) {
+      cout << " a: " << acceleration((*new_tj_s)[i],
+                                     (*new_tj_s)[i-1],
+                                     (*new_tj_s)[i-2], dt);
+    }
+    cout << endl;
+  }
 }
 
 // Trajectory for s and d.
@@ -353,7 +375,14 @@ milliseconds ms = duration_cast<milliseconds>(
   system_clock::now().time_since_epoch()
 );
 
+string traj_log_file = "../log/traj_log.csv";
+ofstream traj_log;
+
 int main() {
+
+  traj_log.open(traj_log_file);
+  traj_log << "S, Vt, At, T\n";
+  traj_log.close();
 
   cost::testIsWrongDirection();
   cost::testSpeedCost();
@@ -366,6 +395,7 @@ int main() {
   vector<double> map_waypoints_s;
   vector<double> map_waypoints_dx;
   vector<double> map_waypoints_dy;
+
 
   // Waypoint map to read from
   string map_file_ = "../data/highway_map.csv";

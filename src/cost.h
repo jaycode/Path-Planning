@@ -21,7 +21,7 @@ namespace {
       double cost = 0.0;
       if (IsWrongDirection(traj)) {
         cost = 999.0;
-        // cout << "failed orientation" << endl;
+        cout << "failed orientation" << endl;
       }
       return cost;
     }
@@ -62,9 +62,9 @@ namespace {
         //                          xy2[0], xy2[1],
         //                          xy3[0], xy3[1],
         //                          dt);
-        double at = acceleration(tj_s[i], tj_d[i],
-                                 tj_s[i-1], tj_d[i-1],
-                                 tj_s[i-2], tj_d[i-2],
+        double at = acceleration(tj_s[i], // tj_d[i],
+                                 tj_s[i-1], // tj_d[i-1],
+                                 tj_s[i-2], // tj_d[i-2],
                                  dt);
         if (at > max_at) {
           cost = 999.0;
@@ -74,7 +74,7 @@ namespace {
       }
 
       if (cost == 0.0) {
-        cout << "-" << endl;
+        // cout << "-" << endl;
       }
       return cost;
     }
@@ -95,10 +95,10 @@ namespace {
       vector<double> tj_s = get<0>(traj);
 
       bool wrong_dir = false;
-      for (int i = 0; i < tj_s.size(); ++i) {
-        if (i > 0 and tj_s[i] < tj_s[i-1]) {
+      for (int i = 1; i < tj_s.size(); ++i) {
+        if (tj_s[i] < tj_s[i-1]) {
           wrong_dir = true;
-          cout << "err_dir ";
+          // cout << "err_dir (" << tj_s[i] << " < " << tj_s[i-1] << ") ";
           break;
         }
       }
