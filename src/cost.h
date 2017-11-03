@@ -48,7 +48,7 @@ namespace {
         cost = fabs(target_v - v);
         if (v < 0.0) {
           cost = 999.0;
-          cout << "err_orient" << endl;
+          // cout << "err_orient" << endl;
           break;
         }
 
@@ -59,7 +59,7 @@ namespace {
                                    dt);
           if (fabs(at) > max_at) {
             cost += 997.0;
-            cout << "err_acc (" << at << " > " << max_at << ")" << endl;
+            // cout << "err_acc (" << at << " > " << max_at << ")" << endl;
             break;
           }
 

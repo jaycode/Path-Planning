@@ -24,7 +24,8 @@ namespace {
 
     // Constraints for trajectories.
     struct constraints {
-      double max_v;
+      double target_v;
+      double target_lane;
       double max_at; // tangential acceleration
       double max_jerk;
     };

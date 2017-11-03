@@ -247,11 +247,72 @@ void TestFrenetDistance(const vector<double> maps_s,
   cout << "dist sd: " << dist_sd << " dist_xy: " << dist_xy << endl;
 }
 
+int FindBestLane(const vector<double> &initial_state,
+                 const json &sensor_fusion) {
+  /**
+   * INPUTS:
+   * initial_state - State of the origin of waypoints.
+   * sensor_fusion - Gathered from sensors in the vehicle.
+   *
+   *
+   * OUTPUT:
+   * Best target lane.
+   */
+  double min_cost = 999999.0;
+  double target_lane = d2lane(initial_state[3]);
+  for (int lane = 0; lane <= 2; lane++) {
+    // If there are other vehicles within a distance, try another lane.
+    double c = cost::LaneCost(initial_state, sensor_fusion, lane);
+    if (c < min_cost) {
+      min_cost = c;
+      target_lane = lane;
+    }
+  }
+  return target_lane;
+}
+
+double FindBestVelocity(const vector<double> &initial_state,
+                        const json &sensor_fusion,
+                        int target_lane,
+                        double max_v) {
+  /**
+   * If the target lane has a vehicle in front of us, follow that
+   * vehicle's velocity, otherwise `max_v`.
+   *
+   * INPUTS:
+   * initial_state - State of the origin of waypoints.
+   * sensor_fusion - Gathered from sensors in the vehicle.
+   * target_lane - The lane the vehicle is heading towards.
+   * max_v - Maximum allowed velocity.
+   *
+   *
+   * OUTPUT:
+   * Best target velocity.
+   */
+
+  double target_v = max_v;
+  double visibility_max = 0;
+  double visibility_min = -8;
+
+  if (d2lane(initial_state[3]) == target_lane) {
+    // Find a vehicle that is within `visibility_max` and `visibility_min` meters
+    // ahead of the final waypoint (i.e. initial state).
+    for (int i = 0; i < sensor_fusion.size(); ++i) {
+      // [ id, x, y, vx, vy, s, d]
+      double dist_s = ((double)sensor_fusion[i][5] - initial_state[0]);
+      if (dist_s < visibility_max && dist_s > visibility_min) {
+        // TODO: Use PID controller to ensure the vehicle does not crash into another.
+        target_v = (double)sensor_fusion[i][3];
+      }
+    }
+  }
+
+  return target_v;
+}
+
 void FindBestTrajectory(const vector<double> &initial_state,
                         int num_wp,
                         constraints t_const,
-                        const json &sensor_fusion,
-
                         vector<double> *new_tj_s,
                         vector<double> *new_tj_d,
                         double dt,
@@ -261,12 +322,9 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
   /**
    * INPUTS:
-   * 
    * initial_state - State of the origin of waypoints.
    * num_wp - Number of waypoints of the resulting trajectory.
-   * t_const - Constraints of trajectory.
-   *           Contains maximum allowed speed and accelerations.
-   * sensor_fusion - Gathered from sensors in the vehicle.
+   * t_const - Constraints of trajectory. See `constraints` class.
    * previous_tj_s - List of s from the previous trajectory.
    * previous_tj_d - List of d from the previous trajectory.
    * dt - Tiem of each iteration in seconds.
@@ -274,25 +332,18 @@ void FindBestTrajectory(const vector<double> &initial_state,
    *
    * OUTPUTS:
    * new_tj_s - Trajectory of s direction.
+   * new_tj_d - Trajectory of d direction.
    */
   double min_cost = 99999999.9;
   tuple<vector<double>, vector<double>> best_traj;
 
   cout << "num_wp: " << num_wp << endl;
   
-  int target_lane = 1;
+  double target_v = t_const.target_v;
+  int target_lane = t_const.target_lane;
   double best_ds;
   double best_T;
   tuple<vector<double>, vector<double>> best_comb_traj;
-
-  // Find best lane
-  for (int lane = 0; lane <= 2; lane++) {
-    // If there are other vehicles within a distance, try another lane.
-    cost::LaneCost(initial_state, sensor_fusion, lane);
-  }
-  if (counter > 300) {
-    target_lane = 2;
-  }
 
   // START - Find best trajectory.
   // We do this by trying out various ds (distance of s) and
@@ -312,14 +363,6 @@ void FindBestTrajectory(const vector<double> &initial_state,
     for (double target_T = 1.5; target_T <= 20.0; target_T += 0.5) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
-      // double target_s = ds;
-      double target_v = t_const.max_v;
-
-      if (d2lane(initial_state[3]) != target_lane) {
-        // Slower speed when changing lane
-        // target_v = mph2mps(40.0);
-      }
- 
       vector<double> target_state = {
         target_s,
         target_v,
@@ -358,9 +401,6 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
       // This is the part that append with new trajectory
       for (int i=0; i < (int)get<0>(traj).size(); ++i) {
-        // get<0>(traj)[i] += initial_state[0];
-        // get<1>(traj)[i] += initial_state[3];
-
         comb_tj_s.push_back(get<0>(traj)[i]);
         comb_tj_d.push_back(get<1>(traj)[i]);
       }
@@ -371,11 +411,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
       // cout << "total comb_tj_s: " << comb_tj_s.size() << endl;
 
-      // cout << "l: " << target_lane << " ds: " << ds << " ";
-      // c += cost::OrientationCost(traj);
       c += cost::MovementCost(comb_traj, target_v, t_const.max_at, t_const.max_jerk, dt);
-      // c += cost::CollisionCost();
-      // cout << "cost: " << c << " min_cost: " << min_cost << endl;
 
       if (c < min_cost) {
         best_traj = traj;
@@ -390,7 +426,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
   // END - Find best trajectory
 
   cout << "initial state: " << initial_state << endl;
-  cout << "target_v: " << t_const.max_v << endl;
+  cout << "target_v: " << t_const.target_v << endl;
   cout << "chosen lane: " << target_lane << 
           " | ds: " << best_ds << " | T: " << best_T <<
           " | cost: " << min_cost << endl;
@@ -458,8 +494,8 @@ int main() {
 
 
   // Waypoint map to read from
-  string map_file_ = "../data/highway_map.csv";
-  // string map_file_ = "../data/highway_map_bosch1 - final.csv";
+  // string map_file_ = "../data/highway_map.csv";
+  string map_file_ = "../data/highway_map_bosch1 - final.csv";
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
@@ -542,6 +578,7 @@ int main() {
           	double end_path_d = j[1]["end_path_d"];
 
           	// Sensor Fusion Data, a list of all other cars on the same side of the road.
+            // [ id, x, y, vx, vy, s, d]
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
           	json msgJson;
@@ -561,18 +598,6 @@ int main() {
             // double max_accel_n = 3.0;
             double max_jerk = 8.0;
             double max_speed = mph2mps(45.0);
-            if (counter > 200) {
-              max_speed = mph2mps(30.0);
-            }
-
-            if (counter > 300) {
-              max_speed = mph2mps(40.0);
-            }
-
-            constraints t_const = {};
-            t_const.max_v = max_speed;
-            t_const.max_at = max_accel_t;
-            t_const.max_jerk = max_jerk;
 
             vector<double> initial_state = {};
 
@@ -591,6 +616,13 @@ int main() {
 
             assert(initial_state.size() > 0);
 
+            double target_lane = FindBestLane(initial_state, sensor_fusion);
+            constraints t_const = {};
+            t_const.target_v = FindBestVelocity(initial_state, sensor_fusion, target_lane, max_speed);
+            t_const.target_lane = target_lane;
+            t_const.max_at = max_accel_t;
+            t_const.max_jerk = max_jerk;
+
             // END - Setup initial state
 
             // START - Find best trajectory
@@ -604,7 +636,6 @@ int main() {
               // To ensure we always have at least 3 prev_tj_s and prev_tj_d.
 
               FindBestTrajectory(initial_state, num_remaining_wp, t_const,
-                                 sensor_fusion,
                                  &new_tj_s, &new_tj_d, dt,
                                  prev_tj_s, prev_tj_d);
 
