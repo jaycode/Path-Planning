@@ -213,12 +213,12 @@ double YawFromTJ(const vector<double> &tj_s,
   return yaw;
 }
 
-void SetupInitialState(const vector<double> &tj_s,
+void SetupFWPState(const vector<double> &tj_s,
                        const vector<double> &tj_d,
-                       vector<double> *initial_state,
+                       vector<double> *fwp_state,
                        double dt=0.02) {
   /*
-  Setup initial state from trajectories.
+  Setup final waypoint state from trajectories.
   */
 
   vector<double> state_s = StateFromTJ(tj_s, dt);
@@ -226,13 +226,13 @@ void SetupInitialState(const vector<double> &tj_s,
 
   // END - Initialize Ref variables
 
-  (*initial_state) = {state_s[0],
-                      state_s[1],
-                      state_s[2],
-                      state_d[0],
-                      state_d[1],
-                      state_d[2]
-                     };
+  (*fwp_state) = {state_s[0],
+                  state_s[1],
+                  state_s[2],
+                  state_d[0],
+                  state_d[1],
+                  state_d[2]
+                 };
 }
 
 void TestFrenetDistance(const vector<double> maps_s,
@@ -247,11 +247,13 @@ void TestFrenetDistance(const vector<double> maps_s,
   cout << "dist sd: " << dist_sd << " dist_xy: " << dist_xy << endl;
 }
 
-int FindBestLane(const vector<double> &initial_state,
+int FindBestLane(const vector<double> &car_state,
+                 const vector<double> &fwp_state,
                  const json &sensor_fusion) {
   /**
    * INPUTS:
-   * initial_state - State of the origin of waypoints.
+   * car_state - State of the vehicle.
+   * fwp_state - State of the final waypoint.
    * sensor_fusion - Gathered from sensors in the vehicle.
    *
    *
@@ -259,10 +261,10 @@ int FindBestLane(const vector<double> &initial_state,
    * Best target lane.
    */
   double min_cost = 999999.0;
-  double target_lane = d2lane(initial_state[3]);
+  double target_lane = d2lane(fwp_state[3]);
   for (int lane = 0; lane <= 2; lane++) {
     // If there are other vehicles within a distance, try another lane.
-    double c = cost::LaneCost(initial_state, sensor_fusion, lane);
+    double c = cost::LaneCost(car_state, fwp_state, sensor_fusion, lane);
     if (c < min_cost) {
       min_cost = c;
       target_lane = lane;
@@ -271,7 +273,8 @@ int FindBestLane(const vector<double> &initial_state,
   return target_lane;
 }
 
-double FindBestVelocity(const vector<double> &initial_state,
+double FindBestVelocity(const vector<double> &car_state,
+                        const vector<double> &fwp_state,
                         const json &sensor_fusion,
                         int target_lane,
                         double max_v) {
@@ -280,8 +283,10 @@ double FindBestVelocity(const vector<double> &initial_state,
    * vehicle's velocity, otherwise `max_v`.
    *
    * INPUTS:
-   * initial_state - State of the origin of waypoints.
+   * car_state - State of the vehicle.
+   * fwp_state - State of the final waypoint.
    * sensor_fusion - Gathered from sensors in the vehicle.
+   *                 [ id, x, y, vx, vy, s, d]
    * target_lane - The lane the vehicle is heading towards.
    * max_v - Maximum allowed velocity.
    *
@@ -291,21 +296,36 @@ double FindBestVelocity(const vector<double> &initial_state,
    */
 
   double target_v = max_v;
-  double visibility_max = 0;
-  double visibility_min = -8;
+  double closest_car_id = -1;
+  double closest_car_dist = 999.0;
+  double visibility_max = 37;
+  double visibility_min = -3;
+  // double visibility_max = 0;
+  // double visibility_min = -8;
 
-  if (d2lane(initial_state[3]) == target_lane) {
+  if (d2lane(fwp_state[3]) == target_lane) {
     // Find a vehicle that is within `visibility_max` and `visibility_min` meters
     // ahead of the final waypoint (i.e. initial state).
     for (int i = 0; i < sensor_fusion.size(); ++i) {
-      // [ id, x, y, vx, vy, s, d]
-      double dist_s = ((double)sensor_fusion[i][5] - initial_state[0]);
-      if (dist_s < visibility_max && dist_s > visibility_min) {
-        // TODO: Use PID controller to ensure the vehicle does not crash into another.
-        target_v = (double)sensor_fusion[i][3];
+      if (d2lane((double)sensor_fusion[i][6]) == target_lane) {
+        double dist_s = ((double)sensor_fusion[i][5] - car_state[0]);
+        // double dist_s = ((double)sensor_fusion[i][5] - fwp_state[0]);
+        if (dist_s < visibility_max && dist_s > visibility_min && dist_s < closest_car_dist) {
+          closest_car_dist = dist_s;
+          closest_car_id = i;
+        }
       }
     }
   }
+
+  if (closest_car_id > -1) {
+    // TODO: Use PID controller to ensure the vehicle does not crash into another.
+    target_v = (double)sensor_fusion[closest_car_id][3];
+    // target_v = mph2mps(20);
+    cout << "dist: " << closest_car_dist << " target_v: " << target_v << endl;
+  }
+
+  cout << "set target_v to " << target_v << endl;
 
   return target_v;
 }
@@ -322,7 +342,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
   /**
    * INPUTS:
-   * initial_state - State of the origin of waypoints.
+   * initial_state - State of the origin of new trajectory.
    * num_wp - Number of waypoints of the resulting trajectory.
    * t_const - Constraints of trajectory. See `constraints` class.
    * previous_tj_s - List of s from the previous trajectory.
@@ -351,16 +371,8 @@ void FindBestTrajectory(const vector<double> &initial_state,
   // function for each generated trajectory, and then pick the trajectory
   // with the smallest cost value.
 
-  vector<double> act_initial_state = {
-    0,
-    initial_state[1],
-    initial_state[2],
-    0,
-    initial_state[4],
-    initial_state[5],
-  };
-  for (double ds = 5.0; ds <= 50.0; ds += 5.0) {
-    for (double target_T = 1.5; target_T <= 20.0; target_T += 0.5) {
+  for (double ds = 5.0; ds <= 90.0; ds += 5.0) {
+    for (double target_T = 1.5; target_T <= 30.0; target_T += 0.5) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
       vector<double> target_state = {
@@ -410,7 +422,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
       // END - Create comb_traj
 
       // cout << "total comb_tj_s: " << comb_tj_s.size() << endl;
-      
+
       c += cost::MovementCost(comb_traj, target_v, t_const.max_at, t_const.max_jerk, dt);
 
       if (c < min_cost) {
@@ -597,26 +609,34 @@ int main() {
             double max_jerk = 8.0;
             double max_speed = mph2mps(45.0);
 
-            vector<double> initial_state = {};
+            // State of the final waypoint
+            // [s, vt, at, d, vn, an]
+            vector<double> fwp_state = {};
+
+            // State of the car
+            // [s, vt, at, d, vn, an]
+            vector<double> car_state = {car_s, car_speed, 0, car_d, 0, 0};
 
             if ((int)prev_tj_s.size() <= 2) {
-              initial_state = {car_s, car_speed, 0,
-                               car_d, 0, 0};
+              fwp_state = car_state;
               ref_yaw = car_yaw;
             }
             else {
-              SetupInitialState(prev_tj_s, prev_tj_d,
-                                &initial_state,
-                                dt);
+              SetupFWPState(prev_tj_s, prev_tj_d,
+                            &fwp_state,
+                            dt);
               ref_yaw = YawFromTJ(prev_tj_s, prev_tj_d,
                                   map_waypoints_s, map_waypoints_x, map_waypoints_y);
             }
 
-            assert(initial_state.size() > 0);
+            assert(fwp_state.size() > 0);
 
-            double target_lane = FindBestLane(initial_state, sensor_fusion);
+            double target_lane = FindBestLane(car_state, fwp_state, sensor_fusion);
             constraints t_const = {};
-            t_const.target_v = FindBestVelocity(initial_state, sensor_fusion, target_lane, max_speed);
+            t_const.target_v = FindBestVelocity(car_state, fwp_state, sensor_fusion, target_lane, max_speed);
+            // if (counter > 25) {
+            //   t_const.target_v = 10.624;
+            // }
             t_const.target_lane = target_lane;
             t_const.max_at = max_accel_t;
             t_const.max_jerk = max_jerk;
@@ -630,10 +650,10 @@ int main() {
 
             int num_remaining_wp = (num_wp - prev_size);
 
-            if (num_remaining_wp > 2) {
+            if (num_remaining_wp > 10) {
               // To ensure we always have at least 3 prev_tj_s and prev_tj_d.
 
-              FindBestTrajectory(initial_state, num_remaining_wp, t_const,
+              FindBestTrajectory(fwp_state, num_remaining_wp, t_const,
                                  &new_tj_s, &new_tj_d, dt,
                                  prev_tj_s, prev_tj_d);
 
