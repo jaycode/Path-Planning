@@ -287,6 +287,32 @@ namespace {
       return {frenet_s,frenet_d};
     }
 
+    void PrintTrajectory(const vector<double> &tj_s,
+                         const vector<double> &tj_d,
+                         double dt) {
+      for (int i = 0; i < tj_s.size(); ++i) {
+        cout << tj_s[i] << ", " << tj_d[i];
+
+        if (i > 0) {
+          cout << " v: " << velocity(tj_s[i],
+                                     tj_s[i-1], dt);
+        } 
+        if (i > 1) {
+          cout << " a: " << acceleration(tj_s[i],
+                                         tj_s[i-1],
+                                         tj_s[i-2], dt);
+        }
+        if (i > 2) {
+          cout << " j: " << jerk(tj_s[i],
+                                 tj_s[i-1],
+                                 tj_s[i-2],
+                                 tj_s[i-3], dt);
+        }
+        cout << endl;
+      }
+
+    }
+
   }
 
 }

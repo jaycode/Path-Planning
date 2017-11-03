@@ -79,10 +79,8 @@ namespace {
       return cost;
     }
 
-    double LaneCost(const vector<double> &car_state,
-                    const vector<double> &fwp_state,
-                    const json &sensor_fusion,
-                    double target_lane) {
+    double LaneChangeCost(const vector<double> &fwp_state,
+                          double target_lane) {
       /**
        * Calculate the cost of a lane given current vehicle and other vehicles.
        */
@@ -100,11 +98,70 @@ namespace {
                 break;
       }
 
-      // Generate a trajectory from the vehicle's position (not final waypoint)
-      // to the chosen lane, and see if it crashes into any vehicle.
-
-
       return(cost);
+    }
+
+    double CollisionCost(const vector<double> &tj_s,
+                         const vector<double> &tj_d,
+                         const json &sensor_fusion) {
+      /**
+       * See if an obstacle exists within a given trajectory.
+       * TODO: Predict obstacle movements.
+       * 
+       * INPUTS:
+       * sensor_fusion: [ id, x, y, vx, vy, s, d]
+       */
+      double cost = 0;
+      double d = 0.5;
+      for (int i = 0; i < (int)tj_s.size(); ++i) {
+        int car_lane = d2lane(tj_d[i]);
+        for (int j = 0; j < (int)sensor_fusion.size(); ++j) {
+          int obs_lane = d2lane((double)sensor_fusion[j][6]);
+          // cout << "car lane: " << car_lane << " obs_lane: " << obs_lane << endl;
+          if (car_lane == obs_lane) {
+            // cout << "check if " << (double)sensor_fusion[j][5] <<
+            //         " is between " << ((double)tj_s[i] - d) << " and " <<
+            //         ((double)tj_s[i] + d) << endl;
+            if ((double)sensor_fusion[j][5] > (double)tj_s[i] - d &&
+                (double)sensor_fusion[j][5] < (double)tj_s[i] + d) {
+              // cout << "yep" << endl;
+              cout << "Car " << sensor_fusion[j][0] << " (" <<
+                      sensor_fusion[j][5] << ", " << sensor_fusion[j][6] << ")" <<
+                      " was found within " << ((double)tj_s[i] - d) <<
+                      " and " << ((double)tj_s[i] + d) << " (lane " << car_lane << ")" <<
+                      endl;
+              cost = 999.0;
+              // One of the few cases where using goto is forgivable:
+              // To quit multiple loops.
+              // Ref: http://en.cppreference.com/w/cpp/language/goto
+              goto out;
+            }
+          }
+        }
+      }
+out:
+      return cost;
+
+    }
+
+    void TestCollisionCost() {
+      // The car is travelling from center lane
+      // to right lane.
+      vector<double> tj_s = {1, 2, 3, 4, 5, 6,  7,  8,  9,  10};
+      vector<double> tj_d = {6, 6, 7, 8, 9, 10, 10, 10, 10, 10};
+
+      // [ id, x, y, vx, vy, s, d]
+      json sf1 = {
+        {0, 0, 0, 0, 0, 3.0, 10.0}
+      };
+      double cost1 = CollisionCost(tj_s, tj_d, sf1);
+      assert(cost1 < 999.0);
+
+      json sf2 = {
+        {0, 0, 0, 0, 0, 7.0, 10.0}
+      };
+      double cost2 = CollisionCost(tj_s, tj_d, sf2);
+      assert(cost2 == 999.0);
     }
 
   }
