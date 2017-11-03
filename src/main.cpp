@@ -410,7 +410,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
       // END - Create comb_traj
 
       // cout << "total comb_tj_s: " << comb_tj_s.size() << endl;
-
+      
       c += cost::MovementCost(comb_traj, target_v, t_const.max_at, t_const.max_jerk, dt);
 
       if (c < min_cost) {
@@ -480,8 +480,6 @@ int main() {
   // traj_log.open(traj_log_file);
   // traj_log << "S, Vt, At, T\n";
   // traj_log.close();
-
-  cost::testIsWrongDirection();
 
   uWS::Hub h;
 
