@@ -562,6 +562,10 @@ int main() {
               max_speed = mph2mps(30.0);
             }
 
+            if (counter > 300) {
+              max_speed = mph2mps(40.0);
+            }
+
             constraints t_const = {};
             t_const.max_v = max_speed;
             t_const.max_at = max_accel_t;
