@@ -290,6 +290,9 @@ void FindBestTrajectory(const vector<double> &initial_state,
     // If there are other vehicles within a distance, try another lane.
     cost::LaneCost(initial_state, sensor_fusion, lane);
   }
+  if (counter > 300) {
+    target_lane = 2;
+  }
 
   // START - Find best trajectory.
   // We do this by trying out various ds (distance of s) and
