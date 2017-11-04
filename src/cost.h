@@ -13,10 +13,10 @@ namespace {
     using namespace helpers;
 
     double MovementCost(const tuple<vector<double>, vector<double>> &traj,
-                            double target_v,
-                            double max_at,
-                            double max_jerk,
-                            double dt) {
+                        double target_v,
+                        double max_at,
+                        double max_jerk,
+                        double dt) {
       /**
        * Raises flag (i.e. large error) when either:
        * - maximum velocity,
@@ -79,8 +79,12 @@ namespace {
       return cost;
     }
 
-    double LaneChangeCost(const vector<double> &fwp_state,
-                          double target_lane) {
+    double LaneDeviationCost(const vector<double> &fwp_state, double target_lane) {
+      double cost = fabs(lane2d(target_lane) - fwp_state[3]);
+      return cost;
+    }
+
+    double LaneChangeCost(const vector<double> &fwp_state, double target_lane) {
       /**
        * Calculate the cost of a lane given current vehicle and other vehicles.
        */
@@ -94,7 +98,7 @@ namespace {
       switch(lane_diff) {
         case 1: cost = 1.0;
                 break;
-        case 2: cost = 10.0;
+        case 2: cost = 1001.0;
                 break;
       }
 
@@ -103,7 +107,8 @@ namespace {
 
     double CollisionCost(const vector<double> &tj_s,
                          const vector<double> &tj_d,
-                         const json &sensor_fusion) {
+                         const json &sensor_fusion,
+                         double dt) {
       /**
        * See if an obstacle exists within a given trajectory.
        * TODO: Predict obstacle movements.
@@ -112,9 +117,11 @@ namespace {
        * sensor_fusion: [ id, x, y, vx, vy, s, d]
        */
       double cost = 0;
-      double d = 0.5;
-      for (int i = 0; i < (int)tj_s.size(); ++i) {
+
+      double ds;
+      for (int i = 1; i < (int)tj_s.size(); ++i) {
         int car_lane = d2lane(tj_d[i]);
+        ds = fabs(tj_s[i] - tj_s[i-1]);
         for (int j = 0; j < (int)sensor_fusion.size(); ++j) {
           int obs_lane = d2lane((double)sensor_fusion[j][6]);
           // cout << "car lane: " << car_lane << " obs_lane: " << obs_lane << endl;
@@ -122,13 +129,36 @@ namespace {
             // cout << "check if " << (double)sensor_fusion[j][5] <<
             //         " is between " << ((double)tj_s[i] - d) << " and " <<
             //         ((double)tj_s[i] + d) << endl;
-            if ((double)sensor_fusion[j][5] > (double)tj_s[i] - d &&
-                (double)sensor_fusion[j][5] < (double)tj_s[i] + d) {
+            // if ((double)sensor_fusion[j][5] > (double)tj_s[i] - ds &&
+            //     (double)sensor_fusion[j][5] <= (double)tj_s[i]) {
+            //   // cout << "yep" << endl;
+            //   cout << "Car " << sensor_fusion[j][0] << " (" <<
+            //           sensor_fusion[j][5] << ", " << sensor_fusion[j][6] << ")" <<
+            //           " was found within " << ((double)tj_s[i] - ds) <<
+            //           " and " << ((double)tj_s[i]) << " (lane " << car_lane << ")" <<
+            //           endl;
+            //   cost = 999.0;
+            //   // One of the few cases where using goto is forgivable:
+            //   // To quit multiple loops.
+            //   // Ref: http://en.cppreference.com/w/cpp/language/goto
+            //   goto out;
+            // }
+
+            // Add by velocity
+            double vx = (double)sensor_fusion[j][3];
+            double vy = (double)sensor_fusion[j][4];
+            double v_norm = 0.8;
+            double v = sqrt(vx*vx + vy*vy) * v_norm;
+            double obs_s = (double)sensor_fusion[j][5] + (i*dt*v);
+            // cout << "obs: " << obs_s << ", s range: " << 
+            //         ((double)tj_s[i] - ds) << " to " << 
+            //         ((double)tj_s[i]) << endl;
+            if (obs_s > (double)tj_s[i] - ds && obs_s <= (double)tj_s[i]) {
               // cout << "yep" << endl;
-              cout << "Car " << sensor_fusion[j][0] << " (" <<
-                      sensor_fusion[j][5] << ", " << sensor_fusion[j][6] << ")" <<
-                      " was found within " << ((double)tj_s[i] - d) <<
-                      " and " << ((double)tj_s[i] + d) << " (lane " << car_lane << ")" <<
+              cout << "Car " << sensor_fusion[j][0] << " +v (" <<
+                      obs_s << ", " << sensor_fusion[j][6] << ")" <<
+                      " was found within " << ((double)tj_s[i] - ds) <<
+                      " and " << ((double)tj_s[i]) << " (lane " << car_lane << ")" <<
                       endl;
               cost = 999.0;
               // One of the few cases where using goto is forgivable:
@@ -144,6 +174,37 @@ out:
 
     }
 
+    double SimpleCollisionCost(double car_s, double target_lane,
+                               const json &sensor_fusion) {
+
+      double cost = 0.0;
+      double dist_ahead = 60;
+      double dist_behind = -10;
+      for (int i = 0; i < (int)sensor_fusion.size(); ++i) {
+        int obs_lane = d2lane((double)sensor_fusion[i][6]);
+        // cout << "obs_lane " << obs_lane << ", target_lane " << target_lane << endl;
+        if (obs_lane == target_lane) {
+          double obs_s = (double)sensor_fusion[i][5];
+          // cout << "checks if " << obs_s << " is between " << (car_s + dist_ahead) <<
+          //         " and " << (car_s + dist_behind) << endl;
+          if (obs_s <= (car_s + dist_ahead) && obs_s >= (car_s + dist_behind)) {
+            cost = 100.0;
+            break;
+          }
+        }
+      }
+      return cost;
+    }
+
+    double DistanceCost(const vector<double> &tj_s) {
+      /**
+       * The farther the car travels, the smaller this cost will be.
+       */
+      double dist = (tj_s[tj_s.size()-1] - tj_s[0]);
+      cout << "dist: " << dist << endl;
+      return -dist;
+    }
+
     void TestCollisionCost() {
       // The car is travelling from center lane
       // to right lane.
@@ -152,16 +213,25 @@ out:
 
       // [ id, x, y, vx, vy, s, d]
       json sf1 = {
-        {0, 0, 0, 0, 0, 3.0, 10.0}
+        {0, 0, 0, 0, 0, 2.0, 10.0}
       };
-      double cost1 = CollisionCost(tj_s, tj_d, sf1);
+      double cost1 = CollisionCost(tj_s, tj_d, sf1, 0.02);
       assert(cost1 < 999.0);
 
       json sf2 = {
         {0, 0, 0, 0, 0, 7.0, 10.0}
       };
-      double cost2 = CollisionCost(tj_s, tj_d, sf2);
+      double cost2 = CollisionCost(tj_s, tj_d, sf2, 0.02);
       assert(cost2 == 999.0);
+    }
+
+    void TestSimpleCollisionCost() {
+      double car_s = 10;
+      double target_lane = 2;
+      json sf = {
+        {0, 0, 0, 0, 0, 12.2, 9}
+      };
+      assert(SimpleCollisionCost(car_s, target_lane, sf) >= 100.0);
     }
 
   }
