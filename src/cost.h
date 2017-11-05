@@ -12,9 +12,10 @@ namespace {
     using json = nlohmann::json;
     using namespace helpers;
 
-    double MovementCost(const tuple<vector<double>, vector<double>> &traj,
+    double TangentialMovementCost(const vector<double> &tj,
+                        double target_s,
                         double target_v,
-                        double max_at,
+                        double max_a,
                         double max_jerk,
                         double dt) {
       /**
@@ -24,14 +25,12 @@ namespace {
        * - or maximum jerk,
        * is higher than the allowed limit.
        */
-      vector<double> tj_s = get<0>(traj);
-      vector<double> tj_d = get<1>(traj);
       double max_v = 0.0;
       double cost = 0.0;
-      // cost = fabs(target_v - velocity(tj_s[(int)tj_s.size()-1], tj_s[(int)tj_s.size()-2], dt));
-      for (int i = 1; i < (int)tj_s.size(); ++i) {
+      // cost = fabs(target_v - velocity(tj[(int)tj.size()-1], tj[(int)tj.size()-2], dt));
+      for (int i = 1; i < (int)tj.size(); ++i) {
 
-        double v = velocity(tj_s[i], tj_s[i-1], dt);
+        double v = velocity(tj[i], tj[i-1], dt);
         if (v > max_v) {
           max_v = v;
         }
@@ -43,21 +42,21 @@ namespace {
         }
 
         if (i > 1) {
-          double at = acceleration(tj_s[i], // tj_d[i],
-                                   tj_s[i-1], // tj_d[i-1],
-                                   tj_s[i-2], // tj_d[i-2],
+          double at = acceleration(tj[i],
+                                   tj[i-1],
+                                   tj[i-2],
                                    dt);
-          if (fabs(at) > max_at) {
+          if (fabs(at) > max_a) {
             cost = 997.0;
-            // cout << "err_acc (" << at << " > " << max_at << ")" << endl;
+            // cout << "err_acc (" << at << " > " << max_a << ")" << endl;
             break;
           }
 
           // TODO: Not sure how to limit jerk. Enabling this code breaks the system.
           // if (i > 2) {
-          //   double at1 = acceleration(tj_s[i-1],
-          //                             tj_s[i-2],
-          //                             tj_s[i-3],
+          //   double at1 = acceleration(tj[i-1],
+          //                             tj[i-2],
+          //                             tj[i-3],
           //                             dt);
           //   double jerk = (at - at1) / dt;
           //   if (fabs(jerk) > max_jerk) {
@@ -80,11 +79,74 @@ namespace {
     }
 
     // double LaneDeviationCost(const vector<double> &fwp_state, double target_lane) {
-    double LaneDeviationCost(const vector<double> &tj_d, double target_lane) {
+    double LaneDeviationCost(const vector<double> &tj_d, double target_d) {
       // double cost = fabs(lane2d(target_lane) - fwp_state[3]);
       double cost = 0.0;
       for (int i = 0; i < tj_d.size(); ++i) {
-        cost += fabs(lane2d(target_lane) - tj_d[i]);
+        cost += fabs(target_d - tj_d[i]);
+      }
+      return cost;
+    }
+
+    double LateralMovementCost(const vector<double> &tj,
+                        double target_d,
+                        double target_v,
+                        double max_a,
+                        double max_jerk,
+                        double dt) {
+      /**
+       * Raises flag (i.e. large error) when either:
+       * - maximum velocity,
+       * - maximum acceleration,
+       * - or maximum jerk,
+       * is higher than the allowed limit.
+       */
+      double max_v = 0.0;
+      double cost = 0.0;
+      // cost = fabs(target_v - velocity(tj[(int)tj.size()-1], tj[(int)tj.size()-2], dt));
+      for (int i = 1; i < (int)tj.size(); ++i) {
+
+        double v = velocity(tj[i], tj[i-1], dt);
+        if (v > max_v) {
+          max_v = v;
+        }
+        cost = fabs(target_v - v);
+
+        if (i > 1) {
+          double at = acceleration(tj[i],
+                                   tj[i-1],
+                                   tj[i-2],
+                                   dt);
+          if (fabs(at) > max_a) {
+            cost = max_a - fabs(at);
+            // cout << "err_acc (" << at << " > " << max_a << ")" << endl;
+            // break;
+          }
+
+          // TODO: Not sure how to limit jerk. Enabling this code breaks the system.
+          // if (i > 2) {
+          //   double at1 = acceleration(tj[i-1],
+          //                             tj[i-2],
+          //                             tj[i-3],
+          //                             dt);
+          //   double jerk = (at - at1) / dt;
+          //   if (fabs(jerk) > max_jerk) {
+          //     cost += 999.0;
+          //     cout << "err_jerk (" << jerk << " > " << max_jerk << ")" << endl;
+          //     break;
+          //   }
+          // }
+        }
+      }
+
+      cost += LaneDeviationCost(tj, target_d);
+
+      if (max_v > target_v) {
+        cost += (max_v - target_v);
+      }
+
+      if (cost == 0.0) {
+        // cout << "-" << endl;
       }
       return cost;
     }

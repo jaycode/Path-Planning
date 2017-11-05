@@ -27,6 +27,7 @@ namespace {
       double target_v;
       double target_lane;
       double max_at; // tangential acceleration
+      double max_an; // normal acceleration
       double max_jerk;
     };
 

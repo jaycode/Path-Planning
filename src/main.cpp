@@ -88,31 +88,26 @@ vector<double> CalcCoeffs(vector<double> initial_state, vector<double> final_sta
 
   INPUTS
 
-  initial_state - [s, v_t, a_t, d, v_n, a_n]
-  final_state   - [s, v_t, a_t, d, v_n, a_n]
+  initial_state - [(s or d), v, a]
+  final_state   - [(s or d), v, a]
   T     - Total time in seconds
 
   OUTPUT
-  An array of length 6. The first 3 for s and the next 3 for d
+  An array of length 6.
   */
 
   vector<double> s_start = {initial_state[0], initial_state[1], initial_state[2]};
   vector<double> s_end = {final_state[0], final_state[1], final_state[2]};
   vector<double> s_coeffs = JMT(s_start, s_end, T);
 
-  vector<double> d_start = {initial_state[3], initial_state[4], initial_state[5]};
-  vector<double> d_end = {final_state[3], final_state[4], final_state[5]};
-  vector<double> d_coeffs = JMT(d_start, d_end, T);
-
-  vector<double> result = {s_coeffs[0], s_coeffs[1], s_coeffs[2], s_coeffs[3], s_coeffs[4], s_coeffs[5],
-                           d_coeffs[0], d_coeffs[1], d_coeffs[2], d_coeffs[3], d_coeffs[4], d_coeffs[5]};
+  vector<double> result = {s_coeffs[0], s_coeffs[1], s_coeffs[2], s_coeffs[3], s_coeffs[4], s_coeffs[5]};
   return result;
 }
 
-tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
-                                                         double T,
-                                                         double dt,
-                                                         int num_wp = -1) {
+vector<double> GenerateTrajectory(vector<double> coeffs,
+                                  double T,
+                                  double dt,
+                                  int num_wp = -1) {
   /*
   From coefficients and final position,
   get list of s and d coordinates.
@@ -125,7 +120,7 @@ tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
 
   INPUTS
 
-  coeffs - Coefficients (alphas) calculated from CalcCoeffs() function.
+  coeffs - 6-elements Coefficients (alphas) calculated from CalcCoeffs() function.
   T      - Total duration in seconds.
   dt     - Duration of a single timeframe.
   num_wp - Number of waypoints to get. -1 for all waypoints.
@@ -136,34 +131,17 @@ tuple<vector<double>, vector<double>> GenerateTrajectory(vector<double> coeffs,
 
   */
 
-  vector<double> s_coeffs = {coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4], coeffs[5]};
-  vector<double> d_coeffs = {coeffs[6], coeffs[7], coeffs[8], coeffs[9], coeffs[10], coeffs[11]};
-  tuple<vector<double>, vector<double>> results;
-  vector<double> list_s;
-  vector<double> list_d;
+  vector<double> tj;
   int wps = min((int)(T/dt), num_wp);
 
   for (int i=1; i <= wps; ++i) {
     double t = i * dt;
     
-    double s = s_coeffs[0]         + s_coeffs[1] * t       + s_coeffs[2] * t*t +
-               s_coeffs[3] * t*t*t + s_coeffs[4] * t*t*t*t + s_coeffs[5] * t*t*t*t*t;
-    // double vt = s_coeffs[1]             + 2 * s_coeffs[2] * t       + 3 * s_coeffs[3] * t*t +
-    //             4 * s_coeffs[4] * t*t*t + 5 * s_coeffs[5] * t*t*t*t
-    //             + adj_vt;
-
-    // double at = 2 * s_coeffs[2] + 6 * s_coeffs[3] * t + 12 * s_coeffs[4] * t*t +
-    //             20 * s_coeffs[5] * t*t*t
-    //             + adj_at;
-
-    double d = d_coeffs[0]         + d_coeffs[1] * t       + d_coeffs[2] * t*t +
-               d_coeffs[3] * t*t*t + d_coeffs[4] * t*t*t*t + d_coeffs[5] * t*t*t*t*t;
-    list_s.push_back(s);
-    list_d.push_back(d);
+    double s = coeffs[0]         + coeffs[1] * t       + coeffs[2] * t*t +
+               coeffs[3] * t*t*t + coeffs[4] * t*t*t*t + coeffs[5] * t*t*t*t*t;
+    tj.push_back(s);
   }
-  get<0>(results) = list_s;
-  get<1>(results) = list_d;
-  return results;
+  return tj;
 }
 
 void CreateWaypoints(vector<double> list_s, vector<double> list_d,
@@ -216,11 +194,12 @@ double YawFromTJ(const vector<double> &tj_s,
 }
 
 void SetupFWPState(const vector<double> &tj_s,
-                       const vector<double> &tj_d,
-                       vector<double> *fwp_state,
-                       double dt=0.02) {
+                   const vector<double> &tj_d,
+                   double dt,
+                   vector<double> *fwp_state) {
   /*
   Setup final waypoint state from trajectories.
+  Returns a 6-elements state.
   */
 
   vector<double> state_s = StateFromTJ(tj_s, dt);
@@ -234,6 +213,24 @@ void SetupFWPState(const vector<double> &tj_s,
                   state_d[0],
                   state_d[1],
                   state_d[2]
+                 };
+}
+
+void SetupFWPState(const vector<double> &tj,
+                   double dt,
+                   vector<double> *fwp_state) {
+  /*
+  Setup final waypoint state from trajectories.
+  Returns a 3-elements state.
+  */
+
+  vector<double> state = StateFromTJ(tj, dt);
+
+  // END - Initialize Ref variables
+
+  (*fwp_state) = {state[0],
+                  state[1],
+                  state[2]
                  };
 }
 
@@ -272,12 +269,12 @@ double FindBestVelocity(const vector<double> &car_state,
    * Best target velocity.
    */
 
-  double dd = fabs(d2lane(car_state[3]) - target_lane);
+  // double dd = fabs(d2lane(car_state[3]) - target_lane);
   double target_v = max_v;
-  if (dd >= 1) {
-    // target_v *= 0.65;
-    target_v = mph2mps(45.0) * 0.65;
-  }
+  // if (dd >= 1) {
+  //   // target_v *= 0.65;
+  //   target_v = mph2mps(45.0) * 0.65;
+  // }
   double closest_car_id = -1;
   double closest_car_dist = 999.0;
   double visibility_max = 30;
@@ -317,6 +314,88 @@ double FindBestVelocity(const vector<double> &car_state,
   return target_v;
 }
 
+void LoopTrajectories(const vector<double> &ds_params,
+                      const vector<double> &dT_params,
+                      const vector<double> &initial_state,
+                      const vector<double> &previous_tj,
+                      double target_s_or_d,
+                      double target_v, double max_a, double max_jerk, int tj_wp, double dt,
+                      double (*cost_function)(const vector<double>&, double, double, double, double, double),
+                      vector<double> *best_tj, vector<double> *best_comb_tj,
+                      double *min_cost, double *best_ds, double *best_T,
+                      vector<double> *best_fwp_state) {
+  /**
+   * We do this by trying out various ds (distance of s) and
+   * target_T (time to reach that distance), calculate the cost
+   * function for each generated trajectory, and then pick the trajectory
+   * with the smallest cost value.
+   * 
+   * INPUTS:
+   * ds_params: [start, end, increment]
+   * dT_params: [start, end, increment]
+   * initial_state: 3-elements state
+   */
+
+  for (double ds = ds_params[0]; ds <= ds_params[1]; ds += ds_params[2]) {
+    for (double target_T = dT_params[0]; target_T <= dT_params[1]; target_T += dT_params[2]) {
+      // Try out various ds
+      double target_s = target_s_or_d + ds;
+      vector<double> target_state = {
+        target_s,
+        target_v,
+        0
+      };
+
+      // cout << "target state (s): " << target_state_s << endl;
+
+      int N = target_T / dt;
+
+      vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
+      vector<double> tj = GenerateTrajectory(coeffs, N*dt, dt, tj_wp);
+      double c = 0;
+
+      // START - Create comb_traj
+
+      // Combine a maximum of last three waypoints of previous trajectory with the new ones.
+      // This step is important so we can calculate MovementCost
+      // throughout the whole combined trajectory (i.e. jerk calculation requires a minimum
+      // of 4 points).
+
+      // This is the part that fills with previous trajectory
+      vector<double> comb_tj;
+      int prevsize = (int)previous_tj.size();
+      for (int i = min(3, prevsize); i > 0; --i) {
+        double s = previous_tj[prevsize - i];
+        comb_tj.push_back(s);
+      }
+
+      // This is the part that append with new trajectory
+      for (int i=0; i < (int)tj.size(); ++i) {
+        comb_tj.push_back(tj[i]);
+      }
+
+      // END - Create comb_traj
+
+      // cout << "total comb_tj_s: " << comb_tj_s.size() << endl;
+
+      vector<double> fwp_state;
+      SetupFWPState(comb_tj, dt, &fwp_state);
+
+      c += (*cost_function)(comb_tj, target_s, target_v, max_a, max_jerk, dt);
+
+      if (c < (*min_cost)) {
+        (*best_tj) = tj;
+        (*best_comb_tj) = comb_tj;
+        (*min_cost) = c;
+        (*best_ds) = ds;
+        (*best_T) = target_T;
+        (*best_fwp_state) = fwp_state;
+      }
+    }
+  }
+  // END - Find best trajectory
+}
+
 void FindBestTrajectory(const vector<double> &initial_state,
                         int tj_wp,
                         int returned_wp,
@@ -331,7 +410,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
   /**
    * INPUTS:
-   * initial_state - State of the origin of new trajectory.
+   * initial_state - 6-element state of the origin of new trajectory.
    * tj_wp - Number of waypoints generated for a trajectory. These waypoints will
    *         be used in cost calculation.
    * returned_wp - Number of waypoints to be returned.
@@ -346,136 +425,92 @@ void FindBestTrajectory(const vector<double> &initial_state,
    * new_tj_s - Trajectory of s direction.
    * new_tj_d - Trajectory of d direction.
    */
-  double min_cost = 99999999.9;
-  tuple<vector<double>, vector<double>> best_traj;
+  double min_cost_s = 99999999.9;
+  double min_cost_d = 99999999.9;
 
-  if (log) {
+  if (log >= 1) {
     cout << "tj_wp: " << tj_wp << endl;
   }
   
   double target_v = t_const.target_v;
   int target_lane = t_const.target_lane;
   double best_ds;
-  double best_T;
-  tuple<vector<double>, vector<double>> best_comb_traj;
-  vector<double> best_fwp_state;
+  double best_dd;
+  double best_T_s;
+  double best_T_d;
+  vector<double> best_tj_s;
+  vector<double> best_tj_d;
+  vector<double> best_comb_tj_s;
+  vector<double> best_comb_tj_d;
+  vector<double> best_fwp_state_s;
+  vector<double> best_fwp_state_d;
 
-  // START - Find best trajectory.
-  // We do this by trying out various ds (distance of s) and
-  // target_T (time to reach that distance), calculate the cost
-  // function for each generated trajectory, and then pick the trajectory
-  // with the smallest cost value.
+  vector<double> ds = {0.0, 60.0, 6.0};
+  vector<double> dT_s = {1.5, 5.0, 0.25};
+  vector<double> initial_state_s = {
+    initial_state[0],
+    initial_state[1],
+    initial_state[2]
+  };
 
-  for (double ds = 0.0; ds <= 60.0; ds += 6.0) {
-    for (double target_T = 1.5; target_T <= 5.0; target_T += 0.25) {
-      // Try out various ds
-      double target_s = initial_state[0] + ds;
-      double target_d = lane2d(target_lane);
-      vector<double> target_state = {
-        target_s,
-        target_v,
-        0,
-        target_d,
-        0,
-        0
-      };
+  LoopTrajectories(ds, dT_s, initial_state_s, previous_tj_s,
+                   initial_state[0], target_v,
+                   t_const.max_at, t_const.max_jerk, tj_wp, dt,
+                   &cost::TangentialMovementCost,
+                   &best_tj_s, &best_comb_tj_s,
+                   &min_cost_s, &best_ds, &best_T_s,
+                   &best_fwp_state_s);
 
-      // cout << "target state: " << target_state << endl;
+  vector<double> dd = {-1.0, 1.0, 0.1};
+  vector<double> dT_d = {best_T_s, best_T_s, 0.1};
+  vector<double> initial_state_d = {
+    initial_state[3],
+    initial_state[4],
+    initial_state[5]
+  };
 
-      int N = target_T / dt;
-
-      vector<double> coeffs = CalcCoeffs(initial_state, target_state, target_T);
-      tuple<vector<double>, vector<double>> traj = GenerateTrajectory(coeffs, N*dt, dt,
-                                                                      tj_wp);
-      double c = 0;
-
-      // START - Create comb_traj
-
-      // Combine a maximum of last three waypoints of previous trajectory with the new ones.
-      // This step is important so we can calculate MovementCost
-      // throughout the whole combined trajectory (i.e. jerk calculation requires a minimum
-      // of 4 points).
-      tuple<vector<double>, vector<double>> comb_traj;
-
-      // This is the part that fills with previous trajectory
-      vector<double> comb_tj_s;
-      vector<double> comb_tj_d;
-      int prevsize = (int)previous_tj_s.size();
-      for (int i = min(3, prevsize); i > 0; --i) {
-        double s = previous_tj_s[prevsize - i];
-        comb_tj_s.push_back(s);
-        double d = previous_tj_d[prevsize - i];
-        comb_tj_d.push_back(d);
-      }
-
-      // This is the part that append with new trajectory
-      for (int i=0; i < (int)get<0>(traj).size(); ++i) {
-        comb_tj_s.push_back(get<0>(traj)[i]);
-        comb_tj_d.push_back(get<1>(traj)[i]);
-      }
-      get<0>(comb_traj) = comb_tj_s;
-      get<1>(comb_traj) = comb_tj_d;
-
-      // END - Create comb_traj
-
-      // cout << "total comb_tj_s: " << comb_tj_s.size() << endl;
-
-      vector<double> fwp_state;
-      SetupFWPState(comb_tj_s, comb_tj_d, &fwp_state, dt);
-
-      c += cost::MovementCost(comb_traj, target_v, t_const.max_at, t_const.max_jerk, dt);
-      // c += cost::LaneDeviationCost(fwd_state, target_lane);
-      c += cost::LaneDeviationCost(comb_tj_d, target_lane);
-
-      if (c < min_cost) {
-        best_traj = traj;
-        best_comb_traj = comb_traj;
-        min_cost = c;
-        best_ds = ds;
-        best_T = target_T;
-        best_fwp_state = fwp_state;
-        // cout << "Set best_traj to traj (size " << get<0>(traj).size() << ")" << endl;
-      }
-    }
-  }
-  // END - Find best trajectory
+  LoopTrajectories(dd, dT_d, initial_state_d, previous_tj_d,
+                   lane2d(target_lane), 0,
+                   t_const.max_an, t_const.max_jerk, 120, dt,
+                   &cost::LateralMovementCost,
+                   &best_tj_d, &best_comb_tj_d,
+                   &min_cost_d, &best_dd, &best_T_d,
+                   &best_fwp_state_d);
 
   if (log >= 1) {
     cout << "initial state: " << initial_state << endl;
-    cout << "fwp state: " << best_fwp_state << endl;
+    cout << "fwp state: " << best_fwp_state_s << ", " << best_fwp_state_d << endl;
     cout << "target_v: " << t_const.target_v << endl;
-    cout << "chosen lane: " << target_lane << 
-            " | ds: " << best_ds << " | T: " << best_T <<
-            " | cost: " << min_cost << endl;
+    cout << "target_lane: " << target_lane << " (d = " << lane2d(target_lane) << ")" << endl;
+    cout << "ds: " << best_ds << " | Ts: " << best_T_s <<
+            " | cost s: " << min_cost_s <<
+            " | dd: " << best_dd << " | Td: " << best_T_d <<
+            " | cost d: " << min_cost_d << endl;
 
   }
 
-  assert(min_cost < 900);
+  assert(min_cost_s < 900);
+  assert(min_cost_d < 900);
 
   // Get only the first `returned_wp` waypoints.
-  if (returned_wp > get<0>(best_traj).size()) {
-    returned_wp = get<0>(best_traj).size();
+  if (returned_wp > best_tj_s.size()) {
+    returned_wp = best_tj_s.size();
   }
 
   vector<double> fin_tj_s;
   vector<double> fin_tj_d;
   for (int i = 0; i < returned_wp; ++i) {
-    fin_tj_s.push_back(get<0>(best_traj)[i]);
-    fin_tj_d.push_back(get<1>(best_traj)[i]);
+    fin_tj_s.push_back(best_tj_s[i]);
+    fin_tj_d.push_back(best_tj_d[i]);
   }
 
   (*new_tj_s) = fin_tj_s;
   (*new_tj_d) = fin_tj_d;
 
-  // (*new_tj_s) = get<0>(best_traj);
-  // (*new_tj_d) = get<1>(best_traj);  
-
-  // cout << "set new_tj_s with tj_s with size " << (*new_tj_s).size() << endl;
-  vector <double> comb_traj_s = get<0>(best_comb_traj);
-  vector <double> comb_traj_d = get<1>(best_comb_traj);
   if (log >= 2) {
-    PrintTrajectory(comb_traj_s, comb_traj_d, dt);
+    PrintTrajectory(best_comb_tj_s, best_comb_tj_d, dt);
   }
+
 }
 
 int FindBestLane(const vector<double> &car_state,
@@ -677,7 +712,7 @@ int main() {
 
             // START - Setup initial state
             double max_accel_t = 8.0;
-            // double max_accel_n = 3.0;
+            double max_accel_n = 8.0;
             double max_jerk = 8.0;
             double max_speed = mph2mps(45.0);
 
@@ -695,8 +730,7 @@ int main() {
             }
             else {
               SetupFWPState(prev_tj_s, prev_tj_d,
-                            &fwp_state,
-                            dt);
+                            dt, &fwp_state);
               ref_yaw = YawFromTJ(prev_tj_s, prev_tj_d,
                                   map_waypoints_s, map_waypoints_x, map_waypoints_y);
             }
@@ -708,13 +742,14 @@ int main() {
 
               constraints t_const = {};
               t_const.max_at = max_accel_t;
+              t_const.max_an = max_accel_n;
               t_const.max_jerk = max_jerk;
               t_const.target_v = max_speed;
               double target_lane = prev_target_lane;
 
-              // Prevents slipping from turning to often in a short period of time.
+              // Prevents slipping from turning too often in a short period of time.
               // This code only allows the car to change target lane after several steps.
-              if (counter - last_turn_counter > 20) {
+              if (counter - last_turn_counter > 40) {
                 target_lane = FindBestLane(car_state, fwp_state, num_wp, num_remaining_wp,
                                            t_const, sensor_fusion, max_speed,
                                            prev_tj_s, prev_tj_d, dt);
@@ -745,7 +780,7 @@ int main() {
 
               FindBestTrajectory(fwp_state, num_remaining_wp, num_remaining_wp, t_const, dt,
                                  &new_tj_s, &new_tj_d,
-                                 prev_tj_s, prev_tj_d, 1);
+                                 prev_tj_s, prev_tj_d, 2);
 
               // cout << "Best trajectory:" << endl;
 
