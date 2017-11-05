@@ -79,8 +79,13 @@ namespace {
       return cost;
     }
 
-    double LaneDeviationCost(const vector<double> &fwp_state, double target_lane) {
-      double cost = fabs(lane2d(target_lane) - fwp_state[3]);
+    // double LaneDeviationCost(const vector<double> &fwp_state, double target_lane) {
+    double LaneDeviationCost(const vector<double> &tj_d, double target_lane) {
+      // double cost = fabs(lane2d(target_lane) - fwp_state[3]);
+      double cost = 0.0;
+      for (int i = 0; i < tj_d.size(); ++i) {
+        cost += fabs(lane2d(target_lane) - tj_d[i]);
+      }
       return cost;
     }
 
@@ -96,7 +101,7 @@ namespace {
       // Incur a small cost for changing lane
       int lane_diff = abs(current_lane - target_lane);
       switch(lane_diff) {
-        case 1: cost = 1.0;
+        case 1: cost = 20.0;
                 break;
         case 2: cost = 1001.0;
                 break;

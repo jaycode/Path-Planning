@@ -272,11 +272,15 @@ double FindBestVelocity(const vector<double> &car_state,
    * Best target velocity.
    */
 
-  double dd = fabs(car_state[3] - lane2d(target_lane)); 
-  double target_v = max_v - (max_v * dd/100);
+  double dd = fabs(d2lane(car_state[3]) - target_lane);
+  double target_v = max_v;
+  if (dd >= 1) {
+    // target_v *= 0.65;
+    target_v = mph2mps(45.0) * 0.65;
+  }
   double closest_car_id = -1;
   double closest_car_dist = 999.0;
-  double visibility_max = 37;
+  double visibility_max = 30;
   double visibility_min = -3;
   // double visibility_max = 0;
   // double visibility_min = -8;
@@ -354,6 +358,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
   double best_ds;
   double best_T;
   tuple<vector<double>, vector<double>> best_comb_traj;
+  vector<double> best_fwp_state;
 
   // START - Find best trajectory.
   // We do this by trying out various ds (distance of s) and
@@ -361,15 +366,16 @@ void FindBestTrajectory(const vector<double> &initial_state,
   // function for each generated trajectory, and then pick the trajectory
   // with the smallest cost value.
 
-  for (double ds = 0.0; ds <= 90.0; ds += 4.5) {
-    for (double target_T = 1.5; target_T <= 30.0; target_T += 0.5) {
+  for (double ds = 0.0; ds <= 60.0; ds += 6.0) {
+    for (double target_T = 1.5; target_T <= 5.0; target_T += 0.25) {
       // Try out various ds
       double target_s = initial_state[0] + ds;
+      double target_d = lane2d(target_lane);
       vector<double> target_state = {
         target_s,
         target_v,
         0,
-        lane2d(target_lane),
+        target_d,
         0,
         0
       };
@@ -418,7 +424,8 @@ void FindBestTrajectory(const vector<double> &initial_state,
       SetupFWPState(comb_tj_s, comb_tj_d, &fwp_state, dt);
 
       c += cost::MovementCost(comb_traj, target_v, t_const.max_at, t_const.max_jerk, dt);
-      c += cost::LaneDeviationCost(fwp_state, target_lane);
+      // c += cost::LaneDeviationCost(fwd_state, target_lane);
+      c += cost::LaneDeviationCost(comb_tj_d, target_lane);
 
       if (c < min_cost) {
         best_traj = traj;
@@ -426,6 +433,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
         min_cost = c;
         best_ds = ds;
         best_T = target_T;
+        best_fwp_state = fwp_state;
         // cout << "Set best_traj to traj (size " << get<0>(traj).size() << ")" << endl;
       }
     }
@@ -434,6 +442,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
 
   if (log >= 1) {
     cout << "initial state: " << initial_state << endl;
+    cout << "fwp state: " << best_fwp_state << endl;
     cout << "target_v: " << t_const.target_v << endl;
     cout << "chosen lane: " << target_lane << 
             " | ds: " << best_ds << " | T: " << best_T <<
@@ -716,11 +725,11 @@ int main() {
                 prev_target_lane = target_lane;
               }
 
-              // if (counter < 25) {
+              // if (counter < 30) {
               //   target_lane = 1;
               // }
               // else {
-              //   target_lane = 0;
+              //   target_lane = 2;
               // }
 
               t_const.target_v = FindBestVelocity(car_state, fwp_state, sensor_fusion,
