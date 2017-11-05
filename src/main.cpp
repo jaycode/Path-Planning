@@ -381,7 +381,7 @@ void LoopTrajectories(const vector<double> &ds_params,
       vector<double> fwp_state;
       SetupFWPState(comb_tj, dt, &fwp_state);
 
-      c += (*cost_function)(comb_tj, target_s, target_v, max_a, max_jerk, dt);
+      c += (*cost_function)(comb_tj, target_s_or_d, target_v, max_a, max_jerk, dt);
 
       if (c < (*min_cost)) {
         (*best_tj) = tj;
@@ -461,7 +461,7 @@ void FindBestTrajectory(const vector<double> &initial_state,
                    &min_cost_s, &best_ds, &best_T_s,
                    &best_fwp_state_s);
 
-  vector<double> dd = {-1.0, 1.0, 0.1};
+  vector<double> dd = {-1.0, 1.0, 0.25};
   vector<double> dT_d = {best_T_s, best_T_s, 0.1};
   vector<double> initial_state_d = {
     initial_state[3],
@@ -714,7 +714,7 @@ int main() {
             double max_accel_t = 8.0;
             double max_accel_n = 8.0;
             double max_jerk = 8.0;
-            double max_speed = mph2mps(45.0);
+            double max_speed = mph2mps(47.0);
 
             // State of the final waypoint
             // [s, vt, at, d, vn, an]
@@ -780,7 +780,7 @@ int main() {
 
               FindBestTrajectory(fwp_state, num_remaining_wp, num_remaining_wp, t_const, dt,
                                  &new_tj_s, &new_tj_d,
-                                 prev_tj_s, prev_tj_d, 2);
+                                 prev_tj_s, prev_tj_d, 1);
 
               // cout << "Best trajectory:" << endl;
 

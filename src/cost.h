@@ -83,7 +83,8 @@ namespace {
       // double cost = fabs(lane2d(target_lane) - fwp_state[3]);
       double cost = 0.0;
       for (int i = 0; i < tj_d.size(); ++i) {
-        cost += fabs(target_d - tj_d[i]);
+        double c = fabs(target_d - fabs(tj_d[i]));
+        cost += c;
       }
       return cost;
     }
@@ -138,6 +139,7 @@ namespace {
           // }
         }
       }
+
 
       cost += LaneDeviationCost(tj, target_d);
 
@@ -246,7 +248,7 @@ out:
 
       double cost = 0.0;
       double dist_ahead = 60;
-      double dist_behind = -10;
+      double dist_behind = -2;
       for (int i = 0; i < (int)sensor_fusion.size(); ++i) {
         int obs_lane = d2lane((double)sensor_fusion[i][6]);
         // cout << "obs_lane " << obs_lane << ", target_lane " << target_lane << endl;
