@@ -228,6 +228,10 @@ namespace {
     // Transform from Frenet s,d coordinates to Cartesian x,y
     vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> maps_x, vector<double> maps_y)
     {
+      double max_s = 6945.554;
+
+      s = fmod(s, max_s);
+
       double heading = sh(s);
 
       double perp_heading = heading-pi()/2;
@@ -309,9 +313,55 @@ namespace {
                                  tj_s[i-2],
                                  tj_s[i-3], dt);
         }
+
         cout << endl;
       }
 
+    }
+
+    void AddWaypointsToLoop(double max_s,
+                            vector<double> *map_waypoints_x,
+                            vector<double> *map_waypoints_y,
+                            vector<double> *map_waypoints_s,
+                            vector<double> *map_waypoints_dx,
+                            vector<double> *map_waypoints_dy) {
+      /**
+       * Add extra waypoint to loop back to the beginning with overlap...
+       * Credit to Denise James's:
+       * https://github.com/DeniseJames/CarND-Path-Planning-Project/blob/master/src/main.cpp
+       */
+      (*map_waypoints_x).push_back((*map_waypoints_x)[0]);
+      (*map_waypoints_y).push_back((*map_waypoints_y)[0]);
+      (*map_waypoints_s).push_back(max_s);
+      (*map_waypoints_dx).push_back((*map_waypoints_dx)[0]);
+      (*map_waypoints_dy).push_back((*map_waypoints_dy)[0]);
+      (*map_waypoints_x).push_back((*map_waypoints_x)[1]);
+      (*map_waypoints_y).push_back((*map_waypoints_y)[1]);
+      (*map_waypoints_s).push_back(max_s + (*map_waypoints_s)[1]);
+      (*map_waypoints_dx).push_back((*map_waypoints_dx)[1]);
+      (*map_waypoints_dy).push_back((*map_waypoints_dy)[1]);
+
+      (*map_waypoints_x).push_back((*map_waypoints_x)[2]);
+      (*map_waypoints_y).push_back((*map_waypoints_y)[2]);
+      (*map_waypoints_s).push_back(max_s + (*map_waypoints_s)[2]);
+      (*map_waypoints_dx).push_back((*map_waypoints_dx)[2]);
+      (*map_waypoints_dy).push_back((*map_waypoints_dy)[2]);
+      (*map_waypoints_x).push_back((*map_waypoints_x)[3]);
+      (*map_waypoints_y).push_back((*map_waypoints_y)[3]);
+      (*map_waypoints_s).push_back(max_s + (*map_waypoints_s)[3]);
+      (*map_waypoints_dx).push_back((*map_waypoints_dx)[3]);
+      (*map_waypoints_dy).push_back((*map_waypoints_dy)[3]);
+
+      (*map_waypoints_x).push_back((*map_waypoints_x)[4]);
+      (*map_waypoints_y).push_back((*map_waypoints_y)[4]);
+      (*map_waypoints_s).push_back(max_s + (*map_waypoints_s)[4]);
+      (*map_waypoints_dx).push_back((*map_waypoints_dx)[4]);
+      (*map_waypoints_dy).push_back((*map_waypoints_dy)[4]);
+      (*map_waypoints_x).push_back((*map_waypoints_x)[5]);
+      (*map_waypoints_y).push_back((*map_waypoints_y)[5]);
+      (*map_waypoints_s).push_back(max_s + (*map_waypoints_s)[5]);
+      (*map_waypoints_dx).push_back((*map_waypoints_dx)[5]);
+      (*map_waypoints_dy).push_back((*map_waypoints_dy)[5]);
     }
 
   }

@@ -614,6 +614,8 @@ int main() {
   counter = 0;
   last_turn_counter = 0;
 
+  bool first = true;
+
   ifstream in_map_(map_file_.c_str(), ifstream::in);
 
   string line;
@@ -636,13 +638,20 @@ int main() {
   	map_waypoints_dy.push_back(d_y);
   }
 
+  AddWaypointsToLoop(max_s,
+                     &map_waypoints_x,
+                     &map_waypoints_y,
+                     &map_waypoints_s,
+                     &map_waypoints_dx,
+                     &map_waypoints_dy);
+
   init(map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
   TestFrenetDistance(map_waypoints_s, map_waypoints_x, map_waypoints_y);
   cost::TestCollisionCost();
   cost::TestSimpleCollisionCost();
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy,&first](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -669,39 +678,38 @@ int main() {
             ms = new_ms;
             // cout << dt << endl;
             int num_wp = 120;
-          
-        	// Main car's localization Data
-          	double car_x = j[1]["x"];
-          	double car_y = j[1]["y"];
-          	double car_s = j[1]["s"];
-          	double car_d = j[1]["d"];
-          	double car_yaw = j[1]["yaw"];
-          	double car_speed = j[1]["speed"];
+
+            // Main car's localization Data
+            double car_x = j[1]["x"];
+            double car_y = j[1]["y"];
+            double car_s = j[1]["s"];
+            double car_d = j[1]["d"];
+            double car_yaw = j[1]["yaw"];
+            double car_speed = j[1]["speed"];
 
             // In initial step, ref_yaw is equal to car_yaw,
             // but on subsequent steps, it is the car's yaw at
             // the last waypoint.
             double ref_yaw;
 
-          	// Previous path data given to the Planner
-          	auto previous_path_x = j[1]["previous_path_x"];
-          	auto previous_path_y = j[1]["previous_path_y"];
+            // Previous path data given to the Planner
+            auto previous_path_x = j[1]["previous_path_x"];
+            auto previous_path_y = j[1]["previous_path_y"];
             int prev_size = (int)previous_path_x.size();
 
             int num_remaining_wp = (num_wp - prev_size);
 
-          	// Previous path's end s and d values 
-          	double end_path_s = j[1]["end_path_s"];
-          	double end_path_d = j[1]["end_path_d"];
+            // Previous path's end s and d values 
+            double end_path_s = j[1]["end_path_s"];
+            double end_path_d = j[1]["end_path_d"];
 
-          	// Sensor Fusion Data, a list of all other cars on the same side of the road.
+            vector<double> next_x_vals;
+            vector<double> next_y_vals;
+            json msgJson;
+
+            // Sensor Fusion Data, a list of all other cars on the same side of the road.
             // [ id, x, y, vx, vy, s, d]
-          	auto sensor_fusion = j[1]["sensor_fusion"];
-
-          	json msgJson;
-
-          	vector<double> next_x_vals;
-          	vector<double> next_y_vals;
+            auto sensor_fusion = j[1]["sensor_fusion"];
 
             // START - Include previous trajectory
             for (int i = 0; i < previous_path_x.size(); ++i) {
@@ -710,110 +718,142 @@ int main() {
             }
             // END - Include previous trajectory
 
-            // START - Setup initial state
-            double max_accel_t = 8.0;
-            double max_accel_n = 8.0;
-            double max_jerk = 8.0;
-            double max_speed = mph2mps(47.0);
 
-            // State of the final waypoint
-            // [s, vt, at, d, vn, an]
-            vector<double> fwp_state = {};
+            if (first) {
+              // Set initial position. Useful to test end-of-map behavior.
+              first = false;
+              // next_x_vals.push_back(car_x);
+              // next_y_vals.push_back(car_y);
 
-            // State of the car
-            // [s, vt, at, d, vn, an]
-            vector<double> car_state = {car_s, car_speed, 0, car_d, 0, 0};
-
-            if ((int)prev_tj_s.size() <= 2) {
-              fwp_state = car_state;
-              ref_yaw = car_yaw;
+              // vector<double> xy = getXY(6930.0, 6.0, map_waypoints_s,
+              //                           map_waypoints_x, map_waypoints_y);
+              // next_x_vals.push_back(xy[0]);
+              // next_y_vals.push_back(xy[1]);
+              // xy = getXY(6931.0, 6.0, map_waypoints_s,
+              //                           map_waypoints_x, map_waypoints_y);
+              // next_x_vals.push_back(xy[0]);
+              // next_y_vals.push_back(xy[1]);
+              // cout << car_x << ", " << car_y << endl;
+              // cout << next_x_vals << endl << next_y_vals << endl;
             }
             else {
-              SetupFWPState(prev_tj_s, prev_tj_d,
-                            dt, &fwp_state);
-              ref_yaw = YawFromTJ(prev_tj_s, prev_tj_d,
-                                  map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            }
+              // START - Setup initial state
+              double max_accel_t = 8.0;
+              double max_accel_n = 8.0;
+              double max_jerk = 8.0;
+              double max_speed = mph2mps(47.0);
 
-            assert(fwp_state.size() > 0);
+              // State of the final waypoint
+              // [s, vt, at, d, vn, an]
+              vector<double> fwp_state = {};
 
-            if (num_remaining_wp > 3) {
-              // To ensure we always have at least 3 prev_tj_s and prev_tj_d.
+              // State of the car
+              // [s, vt, at, d, vn, an]
+              vector<double> car_state = {car_s, car_speed, 0, car_d, 0, 0};
 
-              constraints t_const = {};
-              t_const.max_at = max_accel_t;
-              t_const.max_an = max_accel_n;
-              t_const.max_jerk = max_jerk;
-              t_const.target_v = max_speed;
-              double target_lane = prev_target_lane;
-
-              // Prevents slipping from turning too often in a short period of time.
-              // This code only allows the car to change target lane after several steps.
-              if (counter - last_turn_counter > 40) {
-                target_lane = FindBestLane(car_state, fwp_state, num_wp, num_remaining_wp,
-                                           t_const, sensor_fusion, max_speed,
-                                           prev_tj_s, prev_tj_d, dt);
+              if ((int)prev_tj_s.size() <= 2) {
+                fwp_state = car_state;
+                ref_yaw = car_yaw;
+              }
+              else {
+                SetupFWPState(prev_tj_s, prev_tj_d,
+                              dt, &fwp_state);
+                ref_yaw = YawFromTJ(prev_tj_s, prev_tj_d,
+                                    map_waypoints_s, map_waypoints_x, map_waypoints_y);
               }
 
-              if (target_lane != prev_target_lane) {
-                last_turn_counter = counter;
-                prev_target_lane = target_lane;
-              }
+              assert(fwp_state.size() > 0);
 
-              // if (counter < 30) {
-              //   target_lane = 1;
-              // }
-              // else {
-              //   target_lane = 2;
-              // }
+              if (num_remaining_wp > 3) {
+                // To ensure we always have at least 3 prev_tj_s and prev_tj_d.
 
-              t_const.target_v = FindBestVelocity(car_state, fwp_state, sensor_fusion,
-                                                  target_lane, max_speed, false);
-              t_const.target_lane = target_lane;
+                constraints t_const = {};
+                t_const.max_at = max_accel_t;
+                t_const.max_an = max_accel_n;
+                t_const.max_jerk = max_jerk;
+                t_const.target_v = max_speed;
+                double target_lane = prev_target_lane;
 
-              // END - Setup initial state
-
-              // START - Find best trajectory
-
-              vector<double> new_tj_s;
-              vector<double> new_tj_d;
-
-              FindBestTrajectory(fwp_state, num_remaining_wp, num_remaining_wp, t_const, dt,
-                                 &new_tj_s, &new_tj_d,
-                                 prev_tj_s, prev_tj_d, 1);
-
-              // cout << "Best trajectory:" << endl;
-
-              // Erase previous trajectory
-              prev_tj_s.clear();
-              prev_tj_d.clear();
-
-              for (int i = 0; i < new_tj_s.size(); ++i) {
-                prev_tj_s.push_back(new_tj_s[i]);
-                prev_tj_d.push_back(new_tj_d[i]);
-                // cout << new_tj_s[i] << ", " << new_tj_d[i] << endl;
-              }
-              
-              for (int i = 0; i < new_tj_s.size(); ++i) {
-                // cout << new_tj_s[i] << ", " << new_tj_d[i];
-                if (i > 0) {
-                  double dist = distance(new_tj_s[i], new_tj_d[i],
-                                         new_tj_s[i-1], new_tj_d[i-1]);
-                  // cout << " dist: " << dist << endl;
+                // Prevents slipping from turning too often in a short period of time.
+                // This code only allows the car to change target lane after several steps.
+                if (counter - last_turn_counter > 40) {
+                  target_lane = FindBestLane(car_state, fwp_state, num_wp, num_remaining_wp,
+                                             t_const, sensor_fusion, max_speed,
+                                             prev_tj_s, prev_tj_d, dt);
                 }
+
+                if (target_lane != prev_target_lane) {
+                  last_turn_counter = counter;
+                  prev_target_lane = target_lane;
+                }
+
+                // if (counter < 30) {
+                //   target_lane = 1;
+                // }
+                // else {
+                //   target_lane = 2;
+                // }
+
+                t_const.target_v = FindBestVelocity(car_state, fwp_state, sensor_fusion,
+                                                    target_lane, max_speed, false);
+                t_const.target_lane = target_lane;
+
+                // END - Setup initial state
+
+                // START - Find best trajectory
+
+                vector<double> new_tj_s;
+                vector<double> new_tj_d;
+
+                FindBestTrajectory(fwp_state, num_remaining_wp, num_remaining_wp, t_const, dt,
+                                   &new_tj_s, &new_tj_d,
+                                   prev_tj_s, prev_tj_d, 0);
+
+                // cout << "Best trajectory:" << endl;
+
+                // Erase previous trajectory
+                prev_tj_s.clear();
+                prev_tj_d.clear();
+
+                for (int i = 0; i < new_tj_s.size(); ++i) {
+                  prev_tj_s.push_back(new_tj_s[i]);
+                  prev_tj_d.push_back(new_tj_d[i]);
+                  // cout << new_tj_s[i] << ", " << new_tj_d[i] << endl;
+                }
+                
+                for (int i = 0; i < new_tj_s.size(); ++i) {
+                  // cout << new_tj_s[i] << ", " << new_tj_d[i];
+                  if (i > 0) {
+                    double dist = distance(new_tj_s[i], new_tj_d[i],
+                                           new_tj_s[i-1], new_tj_d[i-1]);
+                    // cout << " dist: " << dist << endl;
+                  }
+                }
+                
+                // END - Find best_trajectory
+
+                CreateWaypoints(new_tj_s, new_tj_d,
+                                map_waypoints_s, map_waypoints_x, map_waypoints_y,
+                                &next_x_vals, &next_y_vals);
+
+                // Prints out new tjs and xy distances.
+                //
+                // vector<double> prev_xy = {};
+                // for (int i = 0; i < new_tj_s.size(); ++i) {
+                //   double s = new_tj_s[i];
+                //   double d = new_tj_d[i];
+                //   vector<double> xy = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+                //   if (prev_xy.size() > 0) {
+                //     cout << "sd: " << s << ", " << d << " xy: " << xy[0] << ", " << xy[1] << 
+                //             " dist: " << distance(xy[0], xy[1], prev_xy[0], prev_xy[1]) << endl;
+                //   }
+                //   prev_xy = xy;
+                // }
+
+                cout << endl;
+
               }
-              
-              // END - Find best_trajectory
-
-              CreateWaypoints(new_tj_s, new_tj_d,
-                              map_waypoints_s, map_waypoints_x, map_waypoints_y,
-                              &next_x_vals, &next_y_vals);
-
-              cout << endl;
-
             }
-            
-
 
             // cout << "size of next trajectory: " << next_x_vals.size() << endl;
 
