@@ -807,7 +807,7 @@ int main() {
 
                 FindBestTrajectory(fwp_state, num_remaining_wp, num_remaining_wp, t_const, dt,
                                    &new_tj_s, &new_tj_d,
-                                   prev_tj_s, prev_tj_d, 0);
+                                   prev_tj_s, prev_tj_d, 1);
 
                 // cout << "Best trajectory:" << endl;
 

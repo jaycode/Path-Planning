@@ -69,7 +69,7 @@ The system currently utilizes a simple collision detection by checking several m
 
 ### Results
 
-The car was able to reach an average of 47 mph without committing any error for 4.32 miles (the entire track).
+The car was able to reach an average of 47 mph without committing any error indefinitely throughout this circular track.
 
 ![Finish](docs/fin.png)
 
