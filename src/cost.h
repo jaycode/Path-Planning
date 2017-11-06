@@ -69,7 +69,8 @@ namespace {
       }
 
       if (max_v > target_v) {
-        cost += (max_v - target_v);
+        cost += fabs(max_v - target_v);
+        // cost = 800;
       }
 
       if (cost == 0.0) {
@@ -247,8 +248,8 @@ out:
                                const json &sensor_fusion) {
 
       double cost = 0.0;
-      double dist_ahead = 60;
-      double dist_behind = -2;
+      double dist_ahead = 50;
+      double dist_behind = -8;
       for (int i = 0; i < (int)sensor_fusion.size(); ++i) {
         int obs_lane = d2lane((double)sensor_fusion[i][6]);
         // cout << "obs_lane " << obs_lane << ", target_lane " << target_lane << endl;

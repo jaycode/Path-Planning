@@ -269,12 +269,12 @@ double FindBestVelocity(const vector<double> &car_state,
    * Best target velocity.
    */
 
-  // double dd = fabs(d2lane(car_state[3]) - target_lane);
+  double dd = fabs(d2lane(car_state[3]) - target_lane);
   double target_v = max_v;
-  // if (dd >= 1) {
-  //   // target_v *= 0.65;
-  //   target_v = mph2mps(45.0) * 0.65;
-  // }
+  if (dd >= 1) {
+    target_v *= 0.90;
+    // target_v = mph2mps(45.0) * 0.65;
+  }
   double closest_car_id = -1;
   double closest_car_dist = 999.0;
   double visibility_max = 30;
@@ -741,7 +741,7 @@ int main() {
               double max_accel_t = 8.0;
               double max_accel_n = 8.0;
               double max_jerk = 8.0;
-              double max_speed = mph2mps(47.0);
+              double max_speed = mph2mps(47.5);
 
               // State of the final waypoint
               // [s, vt, at, d, vn, an]
